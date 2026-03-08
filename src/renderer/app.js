@@ -1093,7 +1093,7 @@ async function describeScreenshot(screenshotBase64, userText) {
 async function createArchitecturePlan(userMessage, chatHistory) {
   console.log('[planner] Sending to', state.modelRoles.planner.model);
 
-  const plannerSystemPrompt = `You are an expert software architect. Your job is to analyze the user's request and produce a detailed implementation plan.
+  const plannerSystemPrompt = `You are an expert software architect. Your job is to analyze the user's request and produce a detailed implementation plan that a coder model will EXECUTE.
 
 Working directory: ${state.workingDir}
 
@@ -1101,15 +1101,22 @@ ${state.currentFile ? `Currently open file: ${state.currentFile}` : ''}
 
 Your plan MUST include:
 1. A brief summary of the approach (2-3 sentences)
-2. A numbered list of EVERY file that needs to be created or modified, with:
-   - Full absolute file path
-   - What the file does / what changes are needed
-   - Key classes, functions, or endpoints it should contain
+2. An EXPLICIT ordered list of operations. For EACH operation specify ONE of:
+   - MOVE: "mv <source> <destination>" — for moving/renaming existing files or directories
+   - MKDIR: "mkdir -p <path>" — for creating new directories
+   - DELETE: "rm -rf <path>" — for removing files/directories no longer needed
+   - CREATE: "<absolute path>" — for new files that need to be written (describe contents briefly)
+   - EDIT: "<absolute path>" — for existing files that need content changes (describe changes)
 3. Dependencies or packages needed (if any)
-4. The order files should be created in (considering dependencies between them)
 
-Be specific and thorough. The coder model will use your plan to generate all the actual code.
-Do NOT write any code yourself — just the plan and file list.`;
+CRITICAL RULES:
+- For RESTRUCTURING tasks (moving files around): use MOVE operations with exact paths. Do NOT recreate files that already exist — MOVE them.
+- Always use FULL ABSOLUTE paths starting with ${state.workingDir}
+- List mkdir commands BEFORE any mv commands that depend on the target directory existing
+- Be specific: "mv ${state.workingDir}/api/routes.py ${state.workingDir}/src/api/routes.py" not "move API files"
+- The coder will convert MOVE/MKDIR/DELETE into RUN_CMD blocks and CREATE/EDIT into EDIT_FILE blocks
+
+Do NOT write any code yourself — just the plan with explicit file operations.`;
 
   const messages = [
     { role: 'system', content: plannerSystemPrompt },
@@ -1332,7 +1339,7 @@ async function sendChat() {
       let continuePrompt = `You have produced ${totalProductive} actions so far.`;
       if (completedFiles) continuePrompt += `\nFiles created/edited:\n  ${completedFiles}`;
       if (completedCmds) continuePrompt += `\nCommands issued:\n  ${completedCmds}`;
-      continuePrompt += `\n\nNow produce the NEXT EDIT_FILE or RUN_CMD block from the architecture plan. Do NOT repeat any of the above. Do NOT use READ_FILE. Do NOT explain — just output the next action block. When ALL files from the plan are done, write "ALL_FILES_COMPLETE".`;
+      continuePrompt += `\n\nNow produce the NEXT action block from the architecture plan. Remember: use RUN_CMD for mkdir/mv/rm operations, EDIT_FILE only for NEW files. Do NOT repeat any of the above. Do NOT use READ_FILE. Do NOT explain — just output the next action block. When ALL operations from the plan are done, write "ALL_FILES_COMPLETE".`;
 
       continuationMessages = [
         continuationMessages[0], // system prompt
@@ -1515,11 +1522,20 @@ To create directories, use RUN_CMD with mkdir -p commands.
   if (isArchitecture && useAgentic) {
     prompt += `
 ARCHITECTURE MODE: A planner model has already created a detailed plan for you.
-Your ONLY job is to EXECUTE that plan by producing EDIT_FILE and RUN_CMD blocks.
-DO NOT explain, summarize, or describe what you plan to do.
-DO NOT use READ_FILE unless absolutely necessary — the plan already tells you what to create.
-START your response with action blocks immediately.
-Produce ALL files in ONE response. Do not stop early.
+Your ONLY job is to EXECUTE that plan by producing action blocks.
+
+CONVERSION RULES — read the plan and convert each operation:
+- "mkdir -p ..." → <RUN_CMD>mkdir -p ...</RUN_CMD>
+- "mv ..." → <RUN_CMD>mv ...</RUN_CMD>
+- "rm ..." → <RUN_CMD>rm ...</RUN_CMD>
+- "CREATE: /path/file" → <EDIT_FILE path="/path/file">file contents</EDIT_FILE>
+- "EDIT: /path/file" → <EDIT_FILE path="/path/file">updated contents</EDIT_FILE>
+
+CRITICAL: For restructuring tasks, you MUST use RUN_CMD with mv to MOVE existing files.
+Do NOT recreate files with EDIT_FILE when the plan says to MOVE them.
+Do NOT explain or describe. Just output action blocks one after another.
+Do NOT use READ_FILE — the plan already tells you what to do.
+Start with mkdir and mv commands FIRST, then create any new files.
 `;
   }
 
