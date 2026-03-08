@@ -102,9 +102,7 @@ const dom = {
   ctxOpenFile: $('#ctx-open-file'),
   ctxDelete: $('#ctx-delete'),
   markdownPreview: $('#markdown-preview'),
-  markdownPreviewTitle: $('#markdown-preview-title'),
   markdownPreviewContent: $('#markdown-preview-content'),
-  btnClosePreview: $('#btn-close-preview'),
 };
 
 // ---- App Init (immediate, no connection needed) ----
@@ -328,7 +326,9 @@ function createTab(filePath) {
   tab.className = 'tab';
   tab.dataset.path = filePath;
 
-  const name = filePath.split('/').pop();
+  const isPreview = filePath.startsWith('preview:');
+  const displayPath = isPreview ? filePath.replace('preview:', '') : filePath;
+  const name = isPreview ? `👁 ${displayPath.split('/').pop()}` : displayPath.split('/').pop();
   tab.innerHTML = `
     <span class="tab-name">${name}</span>
     <span class="tab-modified hidden">●</span>
@@ -356,17 +356,36 @@ function switchToTab(filePath) {
   if (tab) tab.classList.add('active');
 
   state.currentFile = filePath;
-  state.editor.setModel(fileInfo.model);
-  dom.currentFilePath.textContent = filePath;
-  dom.fileModified.classList.toggle('hidden', !fileInfo.modified);
-  setStatus('right', getLanguageFromPath(filePath));
+
+  // Check if this is a markdown preview tab
+  if (fileInfo.isPreview) {
+    dom.markdownPreview.classList.remove('hidden');
+    state.editor.getDomNode().style.display = 'none';
+    dom.currentFilePath.textContent = filePath.replace('preview:', '');
+    dom.fileModified.classList.add('hidden');
+    setStatus('right', 'Markdown Preview');
+  } else {
+    dom.markdownPreview.classList.add('hidden');
+    state.editor.getDomNode().style.display = '';
+    state.editor.setModel(fileInfo.model);
+    dom.currentFilePath.textContent = filePath;
+    dom.fileModified.classList.toggle('hidden', !fileInfo.modified);
+    setStatus('right', getLanguageFromPath(filePath));
+    state.editor.layout();
+  }
 }
 
 function closeTab(filePath) {
   const fileInfo = state.openFiles.get(filePath);
   if (!fileInfo) return;
 
-  fileInfo.model.dispose();
+  if (fileInfo.isPreview) {
+    stopMarkdownPreviewPolling();
+    state.markdownPreviewFile = null;
+    dom.markdownPreview.classList.add('hidden');
+  } else {
+    fileInfo.model.dispose();
+  }
   state.openFiles.delete(filePath);
 
   const tab = dom.tabBar.querySelector(`.tab[data-path="${CSS.escape(filePath)}"]`);
@@ -380,6 +399,8 @@ function closeTab(filePath) {
       state.currentFile = null;
       dom.currentFilePath.textContent = 'No file open';
       dom.fileModified.classList.add('hidden');
+      dom.markdownPreview.classList.add('hidden');
+      state.editor.getDomNode().style.display = '';
       state.editor.setModel(monaco.editor.createModel('// No file open\n', 'plaintext'));
     }
   }
@@ -540,6 +561,14 @@ dom.ctxPreviewMd.addEventListener('click', () => {
 
 // ---- Markdown Preview ----
 async function openMarkdownPreview(filePath) {
+  const previewKey = `preview:${filePath}`;
+
+  // If already open, just switch to it
+  if (state.openFiles.has(previewKey)) {
+    switchToTab(previewKey);
+    return;
+  }
+
   const result = await window.api.fs.read(filePath);
   if (!result.success) {
     addSystemMessage(`Error reading ${filePath}: ${result.error}`);
@@ -547,16 +576,25 @@ async function openMarkdownPreview(filePath) {
   }
 
   const html = marked.parse(result.content);
-  dom.markdownPreviewTitle.textContent = `Preview: ${filePath.split('/').pop()}`;
   dom.markdownPreviewContent.innerHTML = html;
-  dom.markdownPreview.classList.remove('hidden');
-  dom.editorContainer.style.display = 'none';
+
+  // Register as a special tab entry
+  state.openFiles.set(previewKey, {
+    isPreview: true,
+    sourcePath: filePath,
+    modified: false,
+  });
+
+  createTab(previewKey);
+  switchToTab(previewKey);
   state.markdownPreviewFile = filePath;
 
   // Start auto-refresh polling (every 2 seconds)
   stopMarkdownPreviewPolling();
   state.markdownPreviewTimer = setInterval(async () => {
     if (!state.markdownPreviewFile) return;
+    // Only update if the preview tab is active
+    if (state.currentFile !== `preview:${state.markdownPreviewFile}`) return;
     const updated = await window.api.fs.read(state.markdownPreviewFile);
     if (updated.success) {
       const newHtml = marked.parse(updated.content);
@@ -569,22 +607,12 @@ async function openMarkdownPreview(filePath) {
   }, 2000);
 }
 
-function closeMarkdownPreview() {
-  dom.markdownPreview.classList.add('hidden');
-  dom.editorContainer.style.display = '';
-  state.markdownPreviewFile = null;
-  stopMarkdownPreviewPolling();
-  if (state.editor) state.editor.layout();
-}
-
 function stopMarkdownPreviewPolling() {
   if (state.markdownPreviewTimer) {
     clearInterval(state.markdownPreviewTimer);
     state.markdownPreviewTimer = null;
   }
 }
-
-dom.btnClosePreview.addEventListener('click', closeMarkdownPreview);
 
 // ---- Open Folder ----
 async function openFolder() {
