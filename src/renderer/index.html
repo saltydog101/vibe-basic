@@ -26,10 +26,50 @@
         <label for="setting-ollama-host">Ollama Server URL</label>
         <input type="text" id="setting-ollama-host" placeholder="http://192.168.10.160:11434" value="http://192.168.10.160:11434">
       </div>
-      <div class="form-group">
-        <label for="setting-ollama-model">Ollama Model</label>
-        <input type="text" id="setting-ollama-model" placeholder="qwen3:32b" value="qwen3:32b">
+      <h3 style="margin:12px 0 6px;font-size:13px;color:var(--text-secondary)">Model Roles</h3>
+      <div class="form-row">
+        <div class="form-group form-group-half">
+          <label for="setting-model-router">Router</label>
+          <input type="text" id="setting-model-router" placeholder="qwen3:4b" value="qwen3:4b">
+        </div>
+        <div class="form-group form-group-half">
+          <label for="setting-ctx-router">Context</label>
+          <input type="number" id="setting-ctx-router" value="2048" min="256" max="32768">
+        </div>
       </div>
+      <div class="form-row">
+        <div class="form-group form-group-half">
+          <label for="setting-model-coder">Coder</label>
+          <input type="text" id="setting-model-coder" placeholder="qwen3-coder-32k:latest" value="qwen3-coder-32k:latest">
+        </div>
+        <div class="form-group form-group-half">
+          <label for="setting-ctx-coder">Context</label>
+          <input type="number" id="setting-ctx-coder" value="32768" min="1024" max="131072">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group form-group-half">
+          <label for="setting-model-vision">Vision</label>
+          <input type="text" id="setting-model-vision" placeholder="qwen2.5-vl:7b" value="qwen2.5-vl:7b">
+        </div>
+        <div class="form-group form-group-half">
+          <label for="setting-ctx-vision">Context</label>
+          <input type="number" id="setting-ctx-vision" value="4096" min="256" max="32768">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="setting-auto-route" checked>
+          Auto-route (use router model to classify requests)
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="setting-show-routing" checked>
+          Show routing decisions in chat
+        </label>
+      </div>
+      <h3 style="margin:12px 0 6px;font-size:13px;color:var(--text-secondary)">Workspace</h3>
       <div class="form-group">
         <label for="setting-work-dir">Working Directory</label>
         <input type="text" id="setting-work-dir" placeholder="/home/rob" value="">
