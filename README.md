@@ -6,7 +6,7 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 
 - **Monaco Editor** — Full VS Code editor with syntax highlighting, bracket matching, minimap
 - **Local File Explorer** — Browse, create, and delete files/folders on the local machine
-- **Integrated Terminal** — Full interactive local shell (xterm.js)
+- **Integrated Terminal** — Full interactive PTY shell (node-pty + xterm.js) with resize support
 - **Multi-Model AI Routing** — Automatic request classification using a fast router model
   - **Router** (qwen3:4b) — classifies requests as vision/architecture/code/general in ~1 second
   - **Planner** (qwen3:32b) — 32B dense model for architecture, multi-file planning, design decisions
@@ -16,6 +16,8 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 - **Screenshot Capture** — Select a screen region, AI analyzes it via the vision model
 - **Cancel Button** — Abort in-flight AI requests at any time
 - **Configurable Context Limits** — Set `num_ctx` per model role to manage VRAM
+- **Markdown Preview** — Right-click `.md` files to open a rendered preview tab, auto-refreshes every 2s
+- **Context Menu** — Right-click files in explorer for Preview, Open, Delete actions
 - **Multi-tab Editing** — Open multiple files in tabs with modification tracking
 - **Resizable Panels** — Drag to resize sidebar, terminal, and chat panels
 - **Quick File Picker** — `Ctrl+P` to fuzzy-search and open files
@@ -82,6 +84,14 @@ When auto-route is enabled, every request goes through a classification step:
 
 See [docs/multi-model-routing.md](docs/multi-model-routing.md) for the full architecture.
 
+### Markdown Preview
+
+1. Right-click any `.md` file in the explorer
+2. Select **👁 Preview Markdown**
+3. A rendered preview opens as a tab in the editor area
+4. Preview auto-refreshes every 2 seconds (useful when AI is editing the file)
+5. Close via the tab's × button, switch back to editor tabs freely
+
 ### Screenshot Analysis
 
 1. Click the 📷 button to capture a screen region
@@ -94,7 +104,8 @@ When agentic mode is enabled, the AI can:
 - Create and edit files on the local machine
 - Run shell commands (install packages, build projects, etc.)
 - Read files for context, then act on them in a follow-up
-- Chain multiple actions together (up to 5 per response)
+- Chain multiple actions together (up to 50 per response)
+- Graceful directory handling — `READ_FILE` on a directory auto-falls back to listing contents
 
 ## Architecture
 
