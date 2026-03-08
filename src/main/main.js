@@ -8,6 +8,7 @@ let mainWindow;
 let localManager;
 let sshManager;
 let ollamaHost = 'http://192.168.10.160:11434';
+let activeOllamaReq = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -62,14 +63,18 @@ function ollamaFetch(endpoint, body, timeout = 300000) {
       res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
         clearTimeout(timer);
+        activeOllamaReq = null;
         resolve(data);
       });
     });
 
     req.on('error', (err) => {
       clearTimeout(timer);
+      activeOllamaReq = null;
       reject(err);
     });
+
+    activeOllamaReq = req;
 
     if (postData) {
       req.write(postData);
@@ -250,6 +255,17 @@ app.whenReady().then(() => {
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  // --- Cancel active Ollama request ---
+  ipcMain.handle('ollama:cancel', async () => {
+    if (activeOllamaReq) {
+      console.log('[ollama:cancel] Destroying active request');
+      activeOllamaReq.destroy();
+      activeOllamaReq = null;
+      return { success: true };
+    }
+    return { success: false, error: 'No active request' };
   });
 
   // --- Screenshot capture ---

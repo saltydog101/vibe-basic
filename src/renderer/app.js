@@ -84,6 +84,7 @@ const dom = {
   btnOpenFolder: $('#btn-open-folder'),
   btnApplyAll: $('#btn-apply-all'),
   btnScreenshot: $('#btn-screenshot'),
+  btnCancelChat: $('#btn-cancel-chat'),
   screenshotPreview: $('#screenshot-preview'),
   screenshotImg: $('#screenshot-img'),
   btnRemoveScreenshot: $('#btn-remove-screenshot'),
@@ -802,6 +803,7 @@ function escapeHtml(text) {
 }
 
 let chatBusy = false;
+let chatCancelled = false;
 const MAX_ACTIONS_PER_RESPONSE = 5;
 let pendingActions = [];
 
@@ -932,6 +934,9 @@ async function sendChat() {
     return;
   }
   chatBusy = true;
+  chatCancelled = false;
+  dom.btnCancelChat.classList.remove('hidden');
+  dom.btnSendChat.classList.add('hidden');
 
   dom.chatInput.value = '';
 
@@ -1112,8 +1117,19 @@ IMPORTANT INSTRUCTIONS FOR THIS RESPONSE:
   }
 
   dom.btnSendChat.disabled = false;
+  dom.btnCancelChat.classList.add('hidden');
+  dom.btnSendChat.classList.remove('hidden');
   chatBusy = false;
+  chatCancelled = false;
 }
+
+// ---- Cancel handler ----
+dom.btnCancelChat.addEventListener('click', async () => {
+  console.log('[cancel] User cancelled request');
+  chatCancelled = true;
+  await window.api.ollama.cancel();
+  addSystemMessage('Request cancelled.');
+});
 
 function buildSystemPrompt(agentic) {
   // If agentic param not passed, use state default

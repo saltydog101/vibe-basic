@@ -66,6 +66,14 @@ body {
   font-weight: 500;
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+.btn-danger:hover {
+  background: #c0392b;
+}
+
 .form-row {
   display: flex;
   gap: 8px;

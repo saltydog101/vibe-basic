@@ -49,5 +49,6 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('ollama:list'),
     chat: (params) => ipcRenderer.invoke('ollama:chat', params),
     chatStream: (params) => ipcRenderer.invoke('ollama:chat:stream', params),
+    cancel: () => ipcRenderer.invoke('ollama:cancel'),
   },
 });
