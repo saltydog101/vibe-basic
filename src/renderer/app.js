@@ -1068,8 +1068,10 @@ Category:`;
 // ---- Vision: describe screenshot ----
 async function describeScreenshot(screenshotBase64, userText) {
   console.log('[vision] Sending to', state.modelRoles.vision.model);
+  const visionPrompt = (userText ? `Respond in English. ${userText}` : 'Respond in English. Describe this screenshot in detail, focusing on any code, UI elements, errors, or relevant technical details.');
   const messages = [
-    { role: 'user', content: userText || 'Describe this screenshot in detail, focusing on any code, UI elements, errors, or relevant technical details.', images: [screenshotBase64] },
+    { role: 'system', content: 'You are a helpful assistant. Always respond in English only. Never respond in Chinese or any other language.' },
+    { role: 'user', content: visionPrompt, images: [screenshotBase64] },
   ];
 
   const result = await window.api.ollama.chat({
