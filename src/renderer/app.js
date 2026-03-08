@@ -880,10 +880,11 @@ async function sendChat() {
           dom.chatMessages.appendChild(followUpLoading);
           dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 
+          // Build follow-up with file contents clearly embedded
           const followUpMessages = [
             { role: 'system', content: buildSystemPrompt() },
             ...state.chatHistory.slice(-20),
-            { role: 'user', content: 'I\'ve provided the file contents above. Now please continue with the original request and provide your analysis.' },
+            { role: 'user', content: 'The file contents have been provided above. Now continue with the original request: analyze the file and perform any requested actions. Do NOT use READ_FILE again for files already shown. Use EDIT_FILE to create any output files.' },
           ];
 
           try {
@@ -984,36 +985,39 @@ function parseAgenticResponse(content) {
   const actions = [];
   let text = content;
 
-  const editRegex = /<EDIT_FILE\s+path="([^"]+)">\n?([\s\S]*?)<\/EDIT_FILE>/g;
-  let match;
-  while ((match = editRegex.exec(content)) !== null) {
-    actions.push({
-      type: 'edit',
-      filePath: match[1],
-      content: match[2].trimEnd(),
-      description: `Write to ${match[1]}`,
-    });
-    text = text.replace(match[0], `[📝 Edit: ${match[1]}]`);
-  }
+  // Collect all action blocks with their positions so we can sort by order of appearance
+  const allMatches = [];
 
   const readRegex = /<READ_FILE\s+path="([^"]+)">[\s\S]*?<\/READ_FILE>/g;
+  let match;
   while ((match = readRegex.exec(content)) !== null) {
-    actions.push({
-      type: 'read',
-      filePath: match[1],
-      description: `Read ${match[1]}`,
-    });
-    text = text.replace(match[0], `[📖 Read: ${match[1]}]`);
+    allMatches.push({ index: match.index, raw: match[0], type: 'read', filePath: match[1] });
+  }
+
+  const editRegex = /<EDIT_FILE\s+path="([^"]+)">\n?([\s\S]*?)<\/EDIT_FILE>/g;
+  while ((match = editRegex.exec(content)) !== null) {
+    allMatches.push({ index: match.index, raw: match[0], type: 'edit', filePath: match[1], content: match[2].trimEnd() });
   }
 
   const cmdRegex = /<RUN_CMD>\n?([\s\S]*?)<\/RUN_CMD>/g;
   while ((match = cmdRegex.exec(content)) !== null) {
-    actions.push({
-      type: 'command',
-      command: match[1].trim(),
-      description: match[1].trim(),
-    });
-    text = text.replace(match[0], `[▶️ Command: ${match[1].trim()}]`);
+    allMatches.push({ index: match.index, raw: match[0], type: 'command', command: match[1].trim() });
+  }
+
+  // Sort by position in the original content
+  allMatches.sort((a, b) => a.index - b.index);
+
+  for (const m of allMatches) {
+    if (m.type === 'read') {
+      actions.push({ type: 'read', filePath: m.filePath, description: `Read ${m.filePath}` });
+      text = text.replace(m.raw, `[📖 Read: ${m.filePath}]`);
+    } else if (m.type === 'edit') {
+      actions.push({ type: 'edit', filePath: m.filePath, content: m.content, description: `Write to ${m.filePath}` });
+      text = text.replace(m.raw, `[📝 Edit: ${m.filePath}]`);
+    } else if (m.type === 'command') {
+      actions.push({ type: 'command', command: m.command, description: m.command });
+      text = text.replace(m.raw, `[▶️ Command: ${m.command}]`);
+    }
   }
 
   return { text: text.trim(), actions };
@@ -1044,8 +1048,8 @@ async function executeAction(action) {
         const lines = content.split('\n').length;
         const preview = lines > 100 ? content.split('\n').slice(0, 100).join('\n') + `\n... (${lines} total lines)` : content;
         addSystemMessage(`📖 ${action.filePath} (${lines} lines):\n\`\`\`\n${preview}\n\`\`\``);
-        // Add file content to chat history so the model can see it on next turn
-        state.chatHistory.push({ role: 'system', content: `File ${action.filePath} contents:\n${preview}` });
+        // Add file content as a user message so the model reliably sees it
+        state.chatHistory.push({ role: 'user', content: `[File contents of ${action.filePath}]:\n${preview}` });
         // Also open the file in the editor
         await openFile(action.filePath);
       } else {
