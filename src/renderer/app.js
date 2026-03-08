@@ -359,14 +359,14 @@ function switchToTab(filePath) {
 
   // Check if this is a markdown preview tab
   if (fileInfo.isPreview) {
+    dom.editorContainer.style.display = 'none';
     dom.markdownPreview.classList.remove('hidden');
-    state.editor.getDomNode().style.display = 'none';
     dom.currentFilePath.textContent = filePath.replace('preview:', '');
     dom.fileModified.classList.add('hidden');
     setStatus('right', 'Markdown Preview');
   } else {
     dom.markdownPreview.classList.add('hidden');
-    state.editor.getDomNode().style.display = '';
+    dom.editorContainer.style.display = '';
     state.editor.setModel(fileInfo.model);
     dom.currentFilePath.textContent = filePath;
     dom.fileModified.classList.toggle('hidden', !fileInfo.modified);
@@ -400,7 +400,7 @@ function closeTab(filePath) {
       dom.currentFilePath.textContent = 'No file open';
       dom.fileModified.classList.add('hidden');
       dom.markdownPreview.classList.add('hidden');
-      state.editor.getDomNode().style.display = '';
+      dom.editorContainer.style.display = '';
       state.editor.setModel(monaco.editor.createModel('// No file open\n', 'plaintext'));
     }
   }
@@ -1479,10 +1479,19 @@ async function executeAction(action) {
         const lines = content.split('\n').length;
         const preview = lines > 300 ? content.split('\n').slice(0, 300).join('\n') + `\n... (${lines} total lines)` : content;
         addSystemMessage(`📖 ${action.filePath} (${lines} lines):\n\`\`\`\n${preview}\n\`\`\``);
-        // Add file content as a user message so the model reliably sees it
         state.chatHistory.push({ role: 'user', content: `[File contents of ${action.filePath}]:\n${preview}` });
-        // Also open the file in the editor
         await openFile(action.filePath);
+      } else if (result.error && result.error.includes('EISDIR')) {
+        // Path is a directory — fall back to listing its contents
+        addSystemMessage(`${action.filePath} is a directory — listing contents instead.`);
+        const listResult = await window.api.fs.list(action.filePath);
+        if (listResult.success) {
+          const listing = listResult.items.map(i => `${i.isDirectory ? '📁' : '📄'} ${i.name}${i.isDirectory ? '/' : ''} (${i.size} bytes)`).join('\n');
+          addSystemMessage(`📂 ${action.filePath}:\n\`\`\`\n${listing}\n\`\`\``);
+          state.chatHistory.push({ role: 'user', content: `[Directory listing of ${action.filePath}]:\n${listing}` });
+        } else {
+          addSystemMessage(`Failed to list ${action.filePath}: ${listResult.error}`);
+        }
       } else {
         addSystemMessage(`Failed to read ${action.filePath}: ${result.error}`);
       }
