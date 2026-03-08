@@ -890,6 +890,7 @@ Category:`;
       model: state.modelRoles.router.model,
       messages: [{ role: 'user', content: routerPrompt }],
       options: { num_ctx: state.modelRoles.router.num_ctx },
+      timeout: 60000, // 1 minute — classification is fast
     });
 
     if (result.success && result.message) {
@@ -916,6 +917,7 @@ async function describeScreenshot(screenshotBase64, userText) {
     model: state.modelRoles.vision.model,
     messages,
     options: { num_ctx: state.modelRoles.vision.num_ctx },
+    timeout: 120000, // 2 minutes — image description
   });
 
   if (result.success && result.message) {
@@ -1009,6 +1011,7 @@ async function sendChat() {
       model: state.modelRoles.coder.model,
       messages,
       options: { num_ctx: state.modelRoles.coder.num_ctx },
+      timeout: 600000, // 10 minutes — large code generation
     });
 
     console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
@@ -1078,6 +1081,7 @@ IMPORTANT INSTRUCTIONS FOR THIS RESPONSE:
               model: state.modelRoles.coder.model,
               messages: followUpMessages,
               options: { num_ctx: state.modelRoles.coder.num_ctx },
+              timeout: 900000, // 15 minutes — follow-up scaffolding with large context
             });
             followUpLoading.remove();
 

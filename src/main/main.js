@@ -200,12 +200,13 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('ollama:chat', async (event, { model, messages, options, images }) => {
+  ipcMain.handle('ollama:chat', async (event, { model, messages, options, images, timeout }) => {
     try {
-      console.log('[ollama:chat] Sending request to', ollamaHost, 'model:', model, 'messages:', messages.length, 'num_ctx:', options?.num_ctx || 'default');
+      const reqTimeout = timeout || 600000; // default 10 minutes
+      console.log('[ollama:chat] Sending request to', ollamaHost, 'model:', model, 'messages:', messages.length, 'num_ctx:', options?.num_ctx || 'default', 'timeout:', reqTimeout);
       const body = { model, messages, stream: false };
       if (options) body.options = options;
-      const raw = await ollamaFetch('/api/chat', body, 300000);
+      const raw = await ollamaFetch('/api/chat', body, reqTimeout);
       console.log('[ollama:chat] Got response, length:', raw?.length, 'first 200 chars:', raw?.substring(0, 200));
 
       if (!raw || raw.trim() === '') {
