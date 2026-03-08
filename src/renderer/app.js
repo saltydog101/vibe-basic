@@ -1260,6 +1260,7 @@ async function sendChat() {
     const MAX_CONTINUATIONS = 10;
     let continuationCount = 0;
     let allActions = [];
+    let emptyStreak = 0;
 
     // Loop: call coder, parse actions, auto-continue for architecture if new actions were produced
     while (true) {
@@ -1288,36 +1289,55 @@ async function sendChat() {
       const chunk = result.message.content || '';
       fullAiContent += chunk;
 
-      // Parse actions from this chunk
+      // Parse actions from this chunk — only count edit/command as productive (not read)
       const { actions: chunkActions } = parseAgenticResponse(chunk);
       allActions.push(...chunkActions);
-      const filesSoFar = allActions.filter(a => a.type === 'edit' || a.type === 'command').length;
+      const productiveChunkActions = chunkActions.filter(a => a.type === 'edit' || a.type === 'command');
+      const totalProductive = allActions.filter(a => a.type === 'edit' || a.type === 'command').length;
 
-      console.log('[sendChat] Chunk length:', chunk.length, 'chunk actions:', chunkActions.length, 'total actions so far:', allActions.length, 'files/cmds so far:', filesSoFar, 'continuation:', continuationCount);
+      console.log('[sendChat] Chunk length:', chunk.length, 'chunk actions:', chunkActions.length, 'productive:', productiveChunkActions.length, 'total productive:', totalProductive, 'continuation:', continuationCount);
 
-      // For architecture route: keep going if the coder produced action blocks (it's still working)
-      // Stop if: no actions in this chunk, or hit max continuations, or not architecture
-      const shouldContinue = route === 'architecture' &&
-        chunkActions.length > 0 &&
-        continuationCount < MAX_CONTINUATIONS &&
-        !chatCancelled;
-
-      if (shouldContinue) {
-        continuationCount++;
-        const completedFiles = allActions.filter(a => a.type === 'edit').map(a => a.filePath || a.description).join(', ');
-        addSystemMessage(`⏳ Auto-continuing (${continuationCount}/${MAX_CONTINUATIONS}) — ${filesSoFar} actions so far...`);
-        loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> Continuing... (part ${continuationCount + 1}, ${filesSoFar} actions so far)`;
-
-        // Add the partial response as assistant, then ask to continue
-        continuationMessages = [
-          continuationMessages[0], // system prompt
-          continuationMessages[continuationMessages.length - 1], // latest user message with plan
-          { role: 'assistant', content: chunk },
-          { role: 'user', content: `Good. You have created ${filesSoFar} actions so far. Continue producing the REMAINING EDIT_FILE and RUN_CMD blocks from the architecture plan. Do NOT repeat files already created. When you have created ALL files from the plan, end your response with the text "ALL_FILES_COMPLETE".` },
-        ];
-      } else {
+      // For architecture route: always continue until we've exhausted retries
+      // Track consecutive non-productive responses to know when the coder is truly done
+      if (route !== 'architecture' || continuationCount >= MAX_CONTINUATIONS || chatCancelled) {
         break;
       }
+
+      if (productiveChunkActions.length === 0) {
+        emptyStreak++;
+        console.log('[sendChat] No productive actions in chunk, emptyStreak:', emptyStreak);
+        if (emptyStreak >= 3) {
+          console.log('[sendChat] 3 consecutive non-productive responses — stopping');
+          break;
+        }
+      } else {
+        emptyStreak = 0;
+      }
+
+      // Check for explicit completion signal
+      if (chunk.includes('ALL_FILES_COMPLETE')) {
+        console.log('[sendChat] Coder signalled ALL_FILES_COMPLETE — stopping');
+        break;
+      }
+
+      continuationCount++;
+      addSystemMessage(`⏳ Auto-continuing (${continuationCount}/${MAX_CONTINUATIONS}) — ${totalProductive} edits/commands so far...`);
+      loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> Continuing... (part ${continuationCount + 1}, ${totalProductive} edits/cmds)`;
+
+      // Build lean continuation — system + plan + summary of what's done + continue prompt
+      const completedFiles = allActions.filter(a => a.type === 'edit').map(a => a.filePath).join('\n  ');
+      const completedCmds = allActions.filter(a => a.type === 'command').map(a => a.command).join('\n  ');
+      let continuePrompt = `You have produced ${totalProductive} actions so far.`;
+      if (completedFiles) continuePrompt += `\nFiles created/edited:\n  ${completedFiles}`;
+      if (completedCmds) continuePrompt += `\nCommands issued:\n  ${completedCmds}`;
+      continuePrompt += `\n\nNow produce the NEXT EDIT_FILE or RUN_CMD block from the architecture plan. Do NOT repeat any of the above. Do NOT use READ_FILE. Do NOT explain — just output the next action block. When ALL files from the plan are done, write "ALL_FILES_COMPLETE".`;
+
+      continuationMessages = [
+        continuationMessages[0], // system prompt
+        { role: 'user', content: historySlice[historySlice.length - 1].content }, // original user message with plan
+        { role: 'assistant', content: chunk },
+        { role: 'user', content: continuePrompt },
+      ];
     }
 
     loadingDiv.remove();
