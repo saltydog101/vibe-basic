@@ -1247,26 +1247,69 @@ async function sendChat() {
       ...historySlice,
     ];
 
-    // Step 5: Call the coder model
+    // Step 5: Call the coder model (with auto-continuation for architecture)
     const coderOptions = { num_ctx: state.modelRoles.coder.num_ctx };
     if (route === 'architecture') {
       coderOptions.num_predict = 16384; // Allow large output for multi-file scaffolding
     }
     const totalChars = messages.reduce((s, m) => s + m.content.length, 0);
     console.log('[sendChat] Calling coder:', state.modelRoles.coder.model, 'messages:', messages.length, 'totalChars:', totalChars, 'agentic:', useAgentic, 'route:', route, 'num_predict:', coderOptions.num_predict || 'default');
-    const result = await window.api.ollama.chat({
-      model: state.modelRoles.coder.model,
-      messages,
-      options: coderOptions,
-      timeout: route === 'architecture' ? 900000 : 600000, // 15 min for architecture, 10 min otherwise
-    });
 
-    console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
+    let fullAiContent = '';
+    let continuationMessages = [...messages];
+    const MAX_CONTINUATIONS = 5;
+    let continuationCount = 0;
+
+    // Loop: call coder, check if truncated, auto-continue if architecture route
+    while (true) {
+      const result = await window.api.ollama.chat({
+        model: state.modelRoles.coder.model,
+        messages: continuationMessages,
+        options: coderOptions,
+        timeout: route === 'architecture' ? 900000 : 600000,
+      });
+
+      console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
+      console.log('[sendChat] done_reason:', result.done_reason, 'eval_count:', result.eval_count);
+
+      if (!result.success || !result.message) {
+        loadingDiv.remove();
+        console.log('[sendChat] Error result:', result.error);
+        addChatMessage('system', `Error: ${result.error || 'Unknown error'}`);
+        dom.btnSendChat.disabled = false;
+        dom.btnCancelChat.classList.add('hidden');
+        dom.btnSendChat.classList.remove('hidden');
+        chatBusy = false;
+        chatCancelled = false;
+        return;
+      }
+
+      const chunk = result.message.content || '';
+      fullAiContent += chunk;
+      console.log('[sendChat] Chunk length:', chunk.length, 'total so far:', fullAiContent.length, 'continuation:', continuationCount);
+
+      // Check if response was truncated and we should continue (architecture route only)
+      if (route === 'architecture' && result.done_reason === 'length' && continuationCount < MAX_CONTINUATIONS) {
+        continuationCount++;
+        addSystemMessage(`⏳ Response truncated — auto-continuing (${continuationCount}/${MAX_CONTINUATIONS})...`);
+        loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> Continuing... (part ${continuationCount + 1})`;
+
+        // Add the partial response as assistant, then ask to continue
+        continuationMessages = [
+          ...continuationMessages,
+          { role: 'assistant', content: chunk },
+          { role: 'user', content: 'Continue from where you left off. Keep producing EDIT_FILE and RUN_CMD blocks for the remaining files. Do NOT repeat files already created above.' },
+        ];
+      } else {
+        break; // Done (either complete, or not architecture, or max continuations reached)
+      }
+    }
+
     loadingDiv.remove();
 
-    if (result.success && result.message) {
-      const aiContent = result.message.content || '';
-      console.log('[sendChat] AI content length:', aiContent.length, 'first 200:', aiContent.substring(0, 200));
+    if (fullAiContent) {
+      const aiContent = fullAiContent;
+      console.log('[sendChat] Final AI content length:', aiContent.length, 'continuations:', continuationCount);
       state.chatHistory.push({ role: 'assistant', content: aiContent });
 
       if (useAgentic) {
@@ -1357,9 +1400,6 @@ IMPORTANT INSTRUCTIONS FOR THIS RESPONSE:
       } else {
         addChatMessage('assistant', aiContent);
       }
-    } else {
-      console.log('[sendChat] Error result:', result.error);
-      addChatMessage('system', `Error: ${result.error || 'Unknown error'}`);
     }
   } catch (err) {
     console.error('[sendChat] Exception:', err);

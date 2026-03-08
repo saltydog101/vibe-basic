@@ -218,8 +218,8 @@ app.whenReady().then(() => {
         if (data.error) {
           return { success: false, error: `Ollama error: ${data.error}` };
         }
-        console.log('[ollama:chat] Parsed OK, content length:', data.message?.content?.length, 'has thinking:', !!data.message?.thinking);
-        return { success: true, message: data.message };
+        console.log('[ollama:chat] Parsed OK, content length:', data.message?.content?.length, 'has thinking:', !!data.message?.thinking, 'done_reason:', data.done_reason, 'eval_count:', data.eval_count);
+        return { success: true, message: data.message, done_reason: data.done_reason, eval_count: data.eval_count };
       } catch (parseErr) {
         return { success: false, error: `Failed to parse Ollama response: ${raw.substring(0, 500)}` };
       }
