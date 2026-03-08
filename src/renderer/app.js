@@ -1055,7 +1055,15 @@ async function sendChat() {
           const followUpMessages = [
             { role: 'system', content: buildSystemPrompt(true) },
             ...state.chatHistory.slice(-30),
-            { role: 'user', content: `The file contents have been provided above. Here is the original request again: "${originalRequest}"\n\nNow analyze the file contents and perform ALL requested actions. Do NOT use READ_FILE again for files already shown above. Use EDIT_FILE blocks to create ALL necessary output files — include EVERY file needed, not just one. If the request asks to scaffold a project, create ALL source files, config files, and directory structure. Produce ALL EDIT_FILE blocks now in a single response.` },
+            { role: 'user', content: `I have read the files above. Original request: "${originalRequest}"
+
+IMPORTANT INSTRUCTIONS FOR THIS RESPONSE:
+- You MUST produce EDIT_FILE blocks NOW to create all needed files.
+- Do NOT use READ_FILE — all file contents are already above.
+- Do NOT use RUN_CMD to explore or check directories — just create the files directly.
+- EDIT_FILE will create parent directories automatically.
+- Create EVERY file needed in a SINGLE response: source code, configs, requirements, etc.
+- Start with a brief plan (2-3 sentences max), then output all EDIT_FILE blocks.` },
           ];
 
           console.log('[sendChat] Follow-up messages count:', followUpMessages.length, 'total chars:', followUpMessages.reduce((s, m) => s + m.content.length, 0));
