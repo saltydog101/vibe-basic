@@ -138,6 +138,15 @@
         <!-- Editor -->
         <div id="editor-container"></div>
 
+        <!-- Markdown Preview (replaces editor when active) -->
+        <div id="markdown-preview" class="hidden">
+          <div class="markdown-preview-header">
+            <span id="markdown-preview-title">Preview</span>
+            <button id="btn-close-preview" class="icon-btn" title="Close Preview">✕</button>
+          </div>
+          <div id="markdown-preview-content" class="markdown-body"></div>
+        </div>
+
         <!-- Horizontal Resizer -->
         <div class="resizer-h" id="terminal-resizer"></div>
 
@@ -203,6 +212,13 @@
   </div>
 
   <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <!-- Context Menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <div class="context-menu-item" id="ctx-preview-md">👁 Preview Markdown</div>
+    <div class="context-menu-item" id="ctx-open-file">📄 Open File</div>
+    <div class="context-menu-item" id="ctx-delete">🗑 Delete</div>
+  </div>
+
   <script>
     require.config({ paths: { vs: '../../node_modules/monaco-editor/min/vs' } });
     require(['vs/editor/editor.main'], function () {

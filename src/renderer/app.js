@@ -34,6 +34,8 @@ const state = {
   fileIndexDirty: true,
   quickPickerSelectedIndex: 0,
   pendingScreenshot: null,
+  markdownPreviewFile: null,
+  markdownPreviewTimer: null,
 };
 
 // ---- DOM Refs ----
@@ -95,7 +97,17 @@ const dom = {
   quickPickerInput: $('#quick-picker-input'),
   quickPickerResults: $('#quick-picker-results'),
   quickPickerBackdrop: $('.quick-picker-backdrop'),
+  contextMenu: $('#context-menu'),
+  ctxPreviewMd: $('#ctx-preview-md'),
+  ctxOpenFile: $('#ctx-open-file'),
+  ctxDelete: $('#ctx-delete'),
+  markdownPreview: $('#markdown-preview'),
+  markdownPreviewTitle: $('#markdown-preview-title'),
+  markdownPreviewContent: $('#markdown-preview-content'),
+  btnClosePreview: $('#btn-close-preview'),
 };
+
+const marked = require('marked');
 
 // ---- App Init (immediate, no connection needed) ----
 async function initApp() {
@@ -445,6 +457,12 @@ function createTreeItem(name, itemPath, isDirectory, depth) {
     }
   });
 
+  div.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, itemPath, isDirectory, name);
+  });
+
   return div;
 }
 
@@ -462,6 +480,113 @@ function getFileIcon(name) {
 dom.btnRefresh.addEventListener('click', () => {
   loadFileTree(state.currentBrowseDir || state.workingDir);
 });
+
+// ---- Context Menu ----
+let contextMenuTarget = null;
+
+function showContextMenu(x, y, itemPath, isDirectory, name) {
+  contextMenuTarget = { path: itemPath, isDirectory, name };
+  const isMd = !isDirectory && name.toLowerCase().endsWith('.md');
+  dom.ctxPreviewMd.classList.toggle('disabled', !isMd);
+  dom.ctxPreviewMd.style.display = isMd ? '' : 'none';
+  dom.ctxOpenFile.style.display = isDirectory ? 'none' : '';
+
+  dom.contextMenu.style.left = `${x}px`;
+  dom.contextMenu.style.top = `${y}px`;
+  dom.contextMenu.classList.remove('hidden');
+
+  // Clamp to viewport
+  const rect = dom.contextMenu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) dom.contextMenu.style.left = `${window.innerWidth - rect.width - 4}px`;
+  if (rect.bottom > window.innerHeight) dom.contextMenu.style.top = `${window.innerHeight - rect.height - 4}px`;
+}
+
+function hideContextMenu() {
+  dom.contextMenu.classList.add('hidden');
+  contextMenuTarget = null;
+}
+
+document.addEventListener('click', hideContextMenu);
+document.addEventListener('contextmenu', (e) => {
+  if (!e.target.closest('#file-tree')) hideContextMenu();
+});
+
+dom.ctxOpenFile.addEventListener('click', () => {
+  if (contextMenuTarget && !contextMenuTarget.isDirectory) {
+    openFile(contextMenuTarget.path);
+  }
+  hideContextMenu();
+});
+
+dom.ctxDelete.addEventListener('click', async () => {
+  if (!contextMenuTarget) return;
+  const confirmDelete = confirm(`Delete "${contextMenuTarget.name}"?`);
+  if (confirmDelete) {
+    const result = await window.api.fs.delete(contextMenuTarget.path);
+    if (result.success) {
+      state.fileIndexDirty = true;
+      await loadFileTree(state.currentBrowseDir || state.workingDir);
+    } else {
+      alert('Error deleting: ' + result.error);
+    }
+  }
+  hideContextMenu();
+});
+
+dom.ctxPreviewMd.addEventListener('click', () => {
+  if (contextMenuTarget && contextMenuTarget.name.toLowerCase().endsWith('.md')) {
+    openMarkdownPreview(contextMenuTarget.path);
+  }
+  hideContextMenu();
+});
+
+// ---- Markdown Preview ----
+async function openMarkdownPreview(filePath) {
+  const result = await window.api.fs.read(filePath);
+  if (!result.success) {
+    addSystemMessage(`Error reading ${filePath}: ${result.error}`);
+    return;
+  }
+
+  const html = marked.parse(result.content);
+  dom.markdownPreviewTitle.textContent = `Preview: ${filePath.split('/').pop()}`;
+  dom.markdownPreviewContent.innerHTML = html;
+  dom.markdownPreview.classList.remove('hidden');
+  dom.editorContainer.style.display = 'none';
+  state.markdownPreviewFile = filePath;
+
+  // Start auto-refresh polling (every 2 seconds)
+  stopMarkdownPreviewPolling();
+  state.markdownPreviewTimer = setInterval(async () => {
+    if (!state.markdownPreviewFile) return;
+    const updated = await window.api.fs.read(state.markdownPreviewFile);
+    if (updated.success) {
+      const newHtml = marked.parse(updated.content);
+      if (dom.markdownPreviewContent.innerHTML !== newHtml) {
+        const scrollTop = dom.markdownPreviewContent.scrollTop;
+        dom.markdownPreviewContent.innerHTML = newHtml;
+        dom.markdownPreviewContent.scrollTop = scrollTop;
+      }
+    }
+  }, 2000);
+}
+
+function closeMarkdownPreview() {
+  dom.markdownPreview.classList.add('hidden');
+  dom.editorContainer.style.display = '';
+  state.markdownPreviewFile = null;
+  stopMarkdownPreviewPolling();
+  if (state.editor) state.editor.layout();
+}
+
+function stopMarkdownPreviewPolling() {
+  if (state.markdownPreviewTimer) {
+    clearInterval(state.markdownPreviewTimer);
+    state.markdownPreviewTimer = null;
+  }
+}
+
+dom.btnClosePreview.addEventListener('click', closeMarkdownPreview);
 
 // ---- Open Folder ----
 async function openFolder() {
@@ -811,7 +936,7 @@ function escapeHtml(text) {
 
 let chatBusy = false;
 let chatCancelled = false;
-const MAX_ACTIONS_PER_RESPONSE = 5;
+const MAX_ACTIONS_PER_RESPONSE = 50;
 let pendingActions = [];
 
 function updateApplyAllButton() {
