@@ -22,7 +22,7 @@ const state = {
   modelRoles: {
     router: { model: 'qwen3:4b', num_ctx: 2048 },
     coder: { model: 'qwen3-coder-next:latest', num_ctx: 32768 },
-    vision: { model: 'qwen2.5vl:7b', num_ctx: 4096 },
+    vision: { model: 'minicpm-v:latest', num_ctx: 2048 },
   },
   ollamaConnected: false,
   editor: null,

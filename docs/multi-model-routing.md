@@ -18,7 +18,7 @@
 |------|-------|--------|------|-------------|----------|
 | **Router** | qwen3:4b | 4.0B | 5.4 GB | VRAM (always) | Fast request classification, autocomplete |
 | **Coder + Planner** | qwen3-coder-next | 79.7B | 54 GB | VRAM (always, 32K ctx baked) | Code, analysis, planning, general reasoning |
-| **Vision** | qwen2.5vl:7b | 7.6B | 5 GB | VRAM (on demand) | Screenshot/image analysis |
+| **Vision** | minicpm-v:latest | 8B | 4.7 GB | VRAM (always) | Screenshot/image analysis |
 | **Embedder** | nomic-embed-text | 137M | 604 MB | VRAM (always) | Codebase indexing, RAG semantic search |
 
 ### VRAM Budget (observed via `ollama ps`)
@@ -27,14 +27,9 @@
 |-------|------|---------|------------|
 | qwen3-coder-next | 54 GB | 32768 | Forever |
 | qwen3:4b | 3.5 GB | 2048 | Forever |
-| qwen2.5vl:7b | 17 GB* | 32768* | Forever* |
+| minicpm-v:latest | 4.7 GB | 2048 | Forever |
 | nomic-embed-text | 604 MB | 2048 | Forever |
-| **Total** | **~75 GB** | | |
-
-> *Vision model is bloated because it was loaded without `num_ctx` limit, so Ollama
-> auto-expanded to 32768 context (17 GB). Once the IDE calls it with `num_ctx: 4096`,
-> this should drop to ~5 GB. To fix now: `ollama stop qwen2.5vl:7b` on the AI box
-> and let the IDE reload it with the correct context limit.
+| **Total** | **~63 GB** | | |
 
 **Rule**: Every `ollama:chat` API call MUST include `options.num_ctx` to cap context size per model role:
 
@@ -45,8 +40,8 @@
 // Coder — full context for code work
 { model: 'qwen3-coder-next', messages, options: { num_ctx: 32768 } }
 
-// Vision — moderate context for image description
-{ model: 'qwen2.5vl:7b', messages, options: { num_ctx: 4096 } }
+// Vision — image description
+{ model: 'minicpm-v:latest', messages, options: { num_ctx: 2048 } }
 ```
 
 ## Architecture: Router → Model Pipeline
@@ -62,7 +57,7 @@ User sends message (possibly with screenshot)
   │   Classify   │  → "vision" | "code" | "general"
   └──────┬───────┘
          │
-         ├── vision ───► qwen2.5vl:7b (num_ctx: 4096) ──► describe image
+         ├── vision ───► minicpm-v (num_ctx: 2048) ──► describe image
          │                      │
          │                      ▼
          │               Coder (79.7B, num_ctx: 32768) ──► act on description
@@ -76,10 +71,9 @@ User sends message (possibly with screenshot)
 
 1. **The 79.7B coder stays loaded in VRAM permanently** — it's the workhorse
 2. **qwen3:4b runs in system RAM** — always available, near-zero overhead
-3. **qwen2.5vl:7b loads on demand** — only when screenshots are present
-4. **No model swapping** — all small models coexist with the big one
+3. **minicpm-v stays loaded** — small footprint (4.7 GB), always ready for screenshots
+4. **No model swapping** — all models coexist with the big coder
 5. **num_ctx is mandatory** — prevents Ollama from evicting models
-6. **All Qwen family** — consistent behavior and compatibility
 
 ### Router Prompt (qwen3:4b)
 
@@ -102,7 +96,7 @@ Category:
 
 ```
 1. Router classifies as "vision"
-2. Send screenshot + user text to qwen2.5vl:7b (num_ctx: 4096)
+2. Send screenshot + user text to minicpm-v (num_ctx: 2048)
 3. Vision model describes what it sees
 4. Send vision description + user text to coder (num_ctx: 32768)
 5. Coder responds with analysis/actions as usual
@@ -124,15 +118,14 @@ Category:
 2. **`app.js` state** — Add `modelRoles: { router, coder, vision }` with defaults
 3. **`app.js` sendChat** — Add router step before main model call:
    - Call qwen3:4b to classify
-   - If vision: call qwen2.5vl:7b, then forward to coder
+   - If vision: call minicpm-v, then forward to coder
    - If code: call coder with agentic system prompt
    - If general: call coder with non-agentic system prompt
 4. **Settings UI** — Add model role dropdowns (router, coder, vision)
 5. **Chat UI** — Show routing indicator: "🔀 router → vision → coder"
 
 ### Server Changes (done separately by user)
-- Pull `qwen2.5vl:7b`
-- Remove `qwen3:32b` and `qwen3-coder-next`
+- Pull `minicpm-v:latest`
 - Optionally bake num_ctx into Modelfiles as backup
 
 ## Settings UI
@@ -141,12 +134,12 @@ Category:
 Model Roles:
   Router:  [qwen3:4b              ▼]
   Coder:   [qwen3-coder-next:latest ▼]
-  Vision:  [qwen2.5vl:7b         ▼]
+  Vision:  [minicpm-v:latest      ▼]
 
 Context Limits:
   Router:  [2048  ]
   Coder:   [32768 ]
-  Vision:  [4096  ]
+  Vision:  [2048  ]
 
 [x] Auto-route (use router to classify requests)
 [x] Show routing decisions in chat

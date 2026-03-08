@@ -10,7 +10,7 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 - **Multi-Model AI Routing** — Automatic request classification using a fast router model
   - **Router** (qwen3:4b) — classifies requests as vision/code/general in ~1 second
   - **Coder** (qwen3-coder-next) — 79.7B parameter model for code generation, analysis, planning
-  - **Vision** (qwen2.5vl:7b) — screenshot/image analysis, forwards descriptions to coder
+  - **Vision** (minicpm-v) — screenshot/image analysis, forwards descriptions to coder
 - **Agentic Mode** — AI can read/create/edit files and run commands automatically
 - **Screenshot Capture** — Select a screen region, AI analyzes it via the vision model
 - **Cancel Button** — Abort in-flight AI requests at any time
@@ -26,7 +26,7 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 3. Required models pulled on the Ollama server:
    - `qwen3:4b` (router)
    - `qwen3-coder-next:latest` (coder)
-   - `qwen2.5vl:7b` (vision)
+   - `minicpm-v:latest` (vision)
    - `nomic-embed-text` (embedder, optional)
 
 ## Setup
@@ -73,7 +73,7 @@ npm run dev
 When auto-route is enabled, every request goes through a classification step:
 
 1. **Router** (qwen3:4b) classifies the request as `vision`, `code`, or `general`
-2. **Vision** route: screenshot → qwen2.5vl:7b describes → coder acts on description
+2. **Vision** route: screenshot → minicpm-v describes → coder acts on description
 3. **Code** route: coder responds with full agentic capabilities (read/edit/run)
 4. **General** route: coder responds without agentic action blocks
 
@@ -121,8 +121,8 @@ Configurable via the Settings modal (gear icon):
 | Router Context | `2048` | num_ctx for router |
 | Coder Model | `qwen3-coder-next:latest` | Main code generation model |
 | Coder Context | `32768` | num_ctx for coder |
-| Vision Model | `qwen2.5vl:7b` | Image analysis model |
-| Vision Context | `4096` | num_ctx for vision |
+| Vision Model | `minicpm-v:latest` | Image analysis model |
+| Vision Context | `2048` | num_ctx for vision |
 | Auto-route | ON | Use router to classify requests |
 | Show routing | ON | Display routing decisions in chat |
 
