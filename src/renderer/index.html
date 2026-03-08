@@ -114,6 +114,10 @@
         </div>
         <div id="chat-messages"></div>
         <div id="chat-input-area">
+          <div id="screenshot-preview" class="hidden">
+            <img id="screenshot-img" src="" alt="Screenshot">
+            <button id="btn-remove-screenshot" class="btn-icon" title="Remove screenshot">&times;</button>
+          </div>
           <textarea id="chat-input" placeholder="Ask the AI to edit files, run commands, or explain code... (Enter to send, Shift+Enter for newline)" rows="3"></textarea>
           <div class="chat-actions">
             <label class="checkbox-label">
@@ -122,6 +126,7 @@
             </label>
             <div class="chat-actions-right">
               <button id="btn-apply-all" class="btn btn-sm btn-apply-all hidden" title="Execute all pending actions">Apply All</button>
+              <button id="btn-screenshot" class="btn btn-sm" title="Capture screenshot (select area)">📷</button>
               <button id="btn-send-chat" class="btn btn-primary btn-sm">Send</button>
             </div>
           </div>

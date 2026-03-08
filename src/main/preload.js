@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   system: {
     homedir: () => ipcRenderer.invoke('system:homedir'),
     openFolderDialog: () => ipcRenderer.invoke('dialog:openFolder'),
+    screenshot: () => ipcRenderer.invoke('system:screenshot'),
   },
 
   // File System (local)

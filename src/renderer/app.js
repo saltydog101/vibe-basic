@@ -26,6 +26,7 @@ const state = {
   fileIndex: [],
   fileIndexDirty: true,
   quickPickerSelectedIndex: 0,
+  pendingScreenshot: null,
 };
 
 // ---- DOM Refs ----
@@ -69,6 +70,10 @@ const dom = {
   chatResizer: $('#chat-resizer'),
   btnOpenFolder: $('#btn-open-folder'),
   btnApplyAll: $('#btn-apply-all'),
+  btnScreenshot: $('#btn-screenshot'),
+  screenshotPreview: $('#screenshot-preview'),
+  screenshotImg: $('#screenshot-img'),
+  btnRemoveScreenshot: $('#btn-remove-screenshot'),
   quickPicker: $('#quick-picker'),
   quickPickerInput: $('#quick-picker-input'),
   quickPickerResults: $('#quick-picker-results'),
@@ -702,7 +707,7 @@ dom.btnOllamaModels.addEventListener('click', async () => {
 });
 
 // ---- Chat ----
-function addChatMessage(role, content, actions) {
+function addChatMessage(role, content, actions, screenshotBase64) {
   const div = document.createElement('div');
   div.className = 'chat-message';
 
@@ -710,6 +715,9 @@ function addChatMessage(role, content, actions) {
   const roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'AI' : 'System';
 
   let html = `<div class="role ${roleClass}">${roleLabel}</div>`;
+  if (screenshotBase64) {
+    html += `<div class="chat-screenshot"><img src="data:image/png;base64,${screenshotBase64}" style="max-width:300px;max-height:200px;border-radius:4px;margin-bottom:6px;display:block;cursor:pointer;" onclick="window.open(this.src)"></div>`;
+  }
   html += `<div class="content">${formatChatContent(content)}</div>`;
 
   if (actions && actions.length > 0) {
@@ -780,6 +788,33 @@ function updateApplyAllButton() {
   }
 }
 
+// ---- Screenshot ----
+dom.btnScreenshot.addEventListener('click', async () => {
+  dom.btnScreenshot.disabled = true;
+  dom.btnScreenshot.textContent = '...';
+  try {
+    const result = await window.api.system.screenshot();
+    if (result.success) {
+      state.pendingScreenshot = result.base64;
+      dom.screenshotImg.src = `data:image/png;base64,${result.base64}`;
+      dom.screenshotPreview.classList.remove('hidden');
+      dom.chatInput.focus();
+    } else if (result.error !== 'Screenshot cancelled') {
+      addSystemMessage(`Screenshot failed: ${result.error}`);
+    }
+  } catch (err) {
+    addSystemMessage(`Screenshot error: ${err.message}`);
+  }
+  dom.btnScreenshot.disabled = false;
+  dom.btnScreenshot.textContent = '\ud83d\udcf7';
+});
+
+dom.btnRemoveScreenshot.addEventListener('click', () => {
+  state.pendingScreenshot = null;
+  dom.screenshotImg.src = '';
+  dom.screenshotPreview.classList.add('hidden');
+});
+
 dom.btnApplyAll.addEventListener('click', async () => {
   if (pendingActions.length === 0) return;
   dom.btnApplyAll.disabled = true;
@@ -801,7 +836,7 @@ dom.btnApplyAll.addEventListener('click', async () => {
 
 async function sendChat() {
   const input = dom.chatInput.value.trim();
-  if (!input) return;
+  if (!input && !state.pendingScreenshot) return;
   if (chatBusy) {
     console.log('[sendChat] Already busy, ignoring');
     return;
@@ -809,15 +844,44 @@ async function sendChat() {
   chatBusy = true;
 
   dom.chatInput.value = '';
-  addChatMessage('user', input);
+
+  // Handle screenshot attachment
+  const screenshotBase64 = state.pendingScreenshot;
+  if (screenshotBase64) {
+    state.pendingScreenshot = null;
+    dom.screenshotImg.src = '';
+    dom.screenshotPreview.classList.add('hidden');
+  }
+
+  // Show user message with optional screenshot thumbnail
+  const displayText = screenshotBase64
+    ? `${input || '(screenshot)'}\n📷 [Screenshot attached]`
+    : input;
+  addChatMessage('user', displayText, null, screenshotBase64);
 
   const systemPrompt = buildSystemPrompt();
-  state.chatHistory.push({ role: 'user', content: input });
+  const userContent = screenshotBase64
+    ? `${input}\n\n[A screenshot image is attached to this message. Describe what you see if relevant to the request.]`
+    : input;
+  state.chatHistory.push({ role: 'user', content: userContent });
 
+  // Build messages — attach image to the last user message for Ollama
+  const historyMessages = state.chatHistory.slice(-20);
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...state.chatHistory.slice(-20),
+    ...historyMessages,
   ];
+
+  // If screenshot, add images array to the last user message (Ollama vision format)
+  if (screenshotBase64) {
+    const lastUserIdx = messages.length - 1;
+    for (let i = lastUserIdx; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        messages[i] = { ...messages[i], images: [screenshotBase64] };
+        break;
+      }
+    }
+  }
 
   const loadingDiv = document.createElement('div');
   loadingDiv.className = 'chat-message';
@@ -880,12 +944,17 @@ async function sendChat() {
           dom.chatMessages.appendChild(followUpLoading);
           dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 
-          // Build follow-up with file contents clearly embedded
+          // Find the original user request from chatHistory
+          const originalRequest = state.chatHistory.filter(m => m.role === 'user' && !m.content.startsWith('[File contents of')).slice(-1)[0]?.content || '';
+
+          // Build follow-up — include full history so model has file contents + original request
           const followUpMessages = [
             { role: 'system', content: buildSystemPrompt() },
-            ...state.chatHistory.slice(-20),
-            { role: 'user', content: 'The file contents have been provided above. Now continue with the original request: analyze the file and perform any requested actions. Do NOT use READ_FILE again for files already shown. Use EDIT_FILE to create any output files.' },
+            ...state.chatHistory.slice(-30),
+            { role: 'user', content: `The file contents have been provided above. Here is the original request again: "${originalRequest}"\n\nNow analyze the file contents and perform the requested actions. Do NOT use READ_FILE again for files already shown above. Use EDIT_FILE to create any output files. Produce the EDIT_FILE block now.` },
           ];
+
+          console.log('[sendChat] Follow-up messages count:', followUpMessages.length, 'total chars:', followUpMessages.reduce((s, m) => s + m.content.length, 0));
 
           try {
             const followUp = await window.api.ollama.chat({
@@ -897,9 +966,11 @@ async function sendChat() {
             if (followUp.success && followUp.message) {
               const followContent = followUp.message.content || '';
               console.log('[sendChat] Follow-up content length:', followContent.length);
+              console.log('[sendChat] Follow-up first 500 chars:', followContent.substring(0, 500));
               state.chatHistory.push({ role: 'assistant', content: followContent });
 
               const { text: fText, actions: fActions } = parseAgenticResponse(followContent);
+              console.log('[sendChat] Follow-up parsed:', fActions.length, 'actions');
               addChatMessage('assistant', fText, fActions);
               // Follow-up actions also get queued, not auto-executed
               if (fActions.length > 0) {
@@ -907,6 +978,7 @@ async function sendChat() {
               }
             } else {
               followUpLoading.remove();
+              console.log('[sendChat] Follow-up error:', followUp.error);
               addChatMessage('system', `Follow-up error: ${followUp.error || 'Unknown error'}`);
             }
           } catch (fuErr) {
@@ -1046,7 +1118,7 @@ async function executeAction(action) {
       if (result.success) {
         const content = result.content;
         const lines = content.split('\n').length;
-        const preview = lines > 100 ? content.split('\n').slice(0, 100).join('\n') + `\n... (${lines} total lines)` : content;
+        const preview = lines > 300 ? content.split('\n').slice(0, 300).join('\n') + `\n... (${lines} total lines)` : content;
         addSystemMessage(`📖 ${action.filePath} (${lines} lines):\n\`\`\`\n${preview}\n\`\`\``);
         // Add file content as a user message so the model reliably sees it
         state.chatHistory.push({ role: 'user', content: `[File contents of ${action.filePath}]:\n${preview}` });

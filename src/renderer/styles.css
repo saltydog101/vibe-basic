@@ -536,6 +536,44 @@ body {
   align-items: center;
 }
 
+#screenshot-preview {
+  position: relative;
+  padding: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+#screenshot-preview.hidden {
+  display: none;
+}
+#screenshot-img {
+  max-width: 200px;
+  max-height: 120px;
+  border-radius: 3px;
+  display: block;
+}
+#btn-remove-screenshot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+}
+#btn-remove-screenshot:hover {
+  background: var(--danger);
+}
+
 .btn-apply-all {
   background: var(--success);
   color: white;

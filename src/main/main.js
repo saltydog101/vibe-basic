@@ -248,6 +248,26 @@ app.whenReady().then(() => {
     }
   });
 
+  // --- Screenshot capture ---
+  ipcMain.handle('system:screenshot', async () => {
+    const { execSync } = require('child_process');
+    const tmpFile = path.join(os.tmpdir(), `vibe-screenshot-${Date.now()}.png`);
+    try {
+      execSync(`scrot -s "${tmpFile}"`, { timeout: 30000 });
+      const imgBuffer = require('fs').readFileSync(tmpFile);
+      const base64 = imgBuffer.toString('base64');
+      require('fs').unlinkSync(tmpFile);
+      return { success: true, base64, mimeType: 'image/png' };
+    } catch (err) {
+      // Clean up if file was created
+      try { require('fs').unlinkSync(tmpFile); } catch (_) {}
+      if (err.status === null) {
+        return { success: false, error: 'Screenshot cancelled' };
+      }
+      return { success: false, error: err.message };
+    }
+  });
+
   // --- Get home directory ---
   ipcMain.handle('system:homedir', () => {
     return { homedir: os.homedir() };
