@@ -68,6 +68,7 @@ const dom = {
   terminalResizer: $('#terminal-resizer'),
   chatResizer: $('#chat-resizer'),
   btnOpenFolder: $('#btn-open-folder'),
+  btnApplyAll: $('#btn-apply-all'),
   quickPicker: $('#quick-picker'),
   quickPickerInput: $('#quick-picker-input'),
   quickPickerResults: $('#quick-picker-results'),
@@ -713,14 +714,19 @@ function addChatMessage(role, content, actions) {
 
   if (actions && actions.length > 0) {
     for (const action of actions) {
+      const typeLabel = action.type === 'edit' ? '✏️ Edit File' : action.type === 'read' ? '📖 Read File' : '▶️ Run Command';
+      const desc = action.type === 'edit' ? `Write to ${action.filePath}` : action.type === 'read' ? action.filePath : action.command;
       html += `
         <div class="action-block">
-          <div class="action-type">${action.type === 'edit' ? '✏️ Edit File' : '▶️ Run Command'}</div>
-          <pre>${escapeHtml(action.description || action.command || action.content || '')}</pre>
-          <button class="btn btn-sm btn-primary action-apply" data-action='${escapeHtml(JSON.stringify(action))}'>Apply</button>
+          <div class="action-type">${typeLabel}</div>
+          <pre>${escapeHtml(desc)}</pre>
+          <button class="btn btn-sm action-apply" data-action='${escapeHtml(JSON.stringify(action))}'>Apply</button>
         </div>
       `;
+      // Queue action for Apply All
+      pendingActions.push(action);
     }
+    updateApplyAllButton();
   }
 
   div.innerHTML = html;
@@ -732,6 +738,9 @@ function addChatMessage(role, content, actions) {
       btn.textContent = 'Applying...';
       await executeAction(action);
       btn.textContent = 'Applied ✓';
+      // Remove from pending
+      pendingActions = pendingActions.filter(a => JSON.stringify(a) !== JSON.stringify(action));
+      updateApplyAllButton();
     });
   });
 
@@ -758,21 +767,57 @@ function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+let chatBusy = false;
+const MAX_ACTIONS_PER_RESPONSE = 5;
+let pendingActions = [];
+
+function updateApplyAllButton() {
+  if (pendingActions.length > 0) {
+    dom.btnApplyAll.classList.remove('hidden');
+    dom.btnApplyAll.textContent = `Apply All (${pendingActions.length})`;
+  } else {
+    dom.btnApplyAll.classList.add('hidden');
+  }
+}
+
+dom.btnApplyAll.addEventListener('click', async () => {
+  if (pendingActions.length === 0) return;
+  dom.btnApplyAll.disabled = true;
+  dom.btnApplyAll.textContent = 'Applying...';
+  const toApply = [...pendingActions];
+  pendingActions = [];
+  for (const action of toApply) {
+    await executeAction(action);
+    addSystemMessage(`Applied: ${action.type} ${action.type === 'edit' ? action.filePath : action.type === 'read' ? action.filePath : action.command}`);
+  }
+  // Mark all Apply buttons as done
+  document.querySelectorAll('.action-apply:not([disabled])').forEach(btn => {
+    btn.disabled = true;
+    btn.textContent = 'Applied ✓';
+  });
+  dom.btnApplyAll.disabled = false;
+  updateApplyAllButton();
+});
+
 async function sendChat() {
   const input = dom.chatInput.value.trim();
   if (!input) return;
+  if (chatBusy) {
+    console.log('[sendChat] Already busy, ignoring');
+    return;
+  }
+  chatBusy = true;
 
   dom.chatInput.value = '';
   addChatMessage('user', input);
 
   const systemPrompt = buildSystemPrompt();
+  state.chatHistory.push({ role: 'user', content: input });
+
   const messages = [
     { role: 'system', content: systemPrompt },
     ...state.chatHistory.slice(-20),
-    { role: 'user', content: input },
   ];
-
-  state.chatHistory.push({ role: 'user', content: input });
 
   const loadingDiv = document.createElement('div');
   loadingDiv.className = 'chat-message';
@@ -783,37 +828,106 @@ async function sendChat() {
   dom.btnSendChat.disabled = true;
 
   try {
+    console.log('[sendChat] Calling ollama.chat, model:', state.ollamaModel, 'messages:', messages.length);
     const result = await window.api.ollama.chat({
       model: state.ollamaModel,
       messages,
     });
 
+    console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
     loadingDiv.remove();
 
     if (result.success && result.message) {
-      const aiContent = result.message.content;
+      const aiContent = result.message.content || '';
+      console.log('[sendChat] AI content length:', aiContent.length, 'first 200:', aiContent.substring(0, 200));
       state.chatHistory.push({ role: 'assistant', content: aiContent });
 
       if (state.agenticMode) {
         const { text, actions } = parseAgenticResponse(aiContent);
+        console.log('[sendChat] Parsed agentic: text length:', text.length, 'actions:', actions.length);
         addChatMessage('assistant', text, actions);
 
-        for (const action of actions) {
+        const cappedActions = actions.slice(0, MAX_ACTIONS_PER_RESPONSE);
+        if (actions.length > MAX_ACTIONS_PER_RESPONSE) {
+          addSystemMessage(`⚠ Capped at ${MAX_ACTIONS_PER_RESPONSE} actions (${actions.length} requested). Run remaining manually.`);
+        }
+
+        // Auto-execute READ_FILE actions immediately (they just display content)
+        // All other actions get queued for Apply All
+        const readActions = cappedActions.filter(a => a.type === 'read');
+        const otherActions = cappedActions.filter(a => a.type !== 'read');
+
+        for (const action of readActions) {
+          console.log('[sendChat] Auto-executing read:', action.filePath);
           await executeAction(action);
-          addSystemMessage(`Action executed: ${action.type} ${action.type === 'edit' ? action.filePath : action.command}`);
+          addSystemMessage(`Read: ${action.filePath}`);
+          // Remove from pending since we auto-executed it
+          pendingActions = pendingActions.filter(a => !(a.type === 'read' && a.filePath === action.filePath));
+          updateApplyAllButton();
+        }
+
+        if (otherActions.length > 0) {
+          addSystemMessage(`${otherActions.length} action(s) queued — click **Apply All** to execute.`);
+        }
+
+        // If only read actions, auto-follow-up so model can analyze
+        if (readActions.length > 0 && otherActions.length === 0) {
+          console.log('[sendChat] Auto-follow-up after READ_FILE actions');
+
+          const followUpLoading = document.createElement('div');
+          followUpLoading.className = 'chat-message';
+          followUpLoading.innerHTML = '<div class="role assistant-role">AI</div><div class="content"><span class="spinner"></span> Analyzing...</div>';
+          dom.chatMessages.appendChild(followUpLoading);
+          dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+
+          const followUpMessages = [
+            { role: 'system', content: buildSystemPrompt() },
+            ...state.chatHistory.slice(-20),
+            { role: 'user', content: 'I\'ve provided the file contents above. Now please continue with the original request and provide your analysis.' },
+          ];
+
+          try {
+            const followUp = await window.api.ollama.chat({
+              model: state.ollamaModel,
+              messages: followUpMessages,
+            });
+            followUpLoading.remove();
+
+            if (followUp.success && followUp.message) {
+              const followContent = followUp.message.content || '';
+              console.log('[sendChat] Follow-up content length:', followContent.length);
+              state.chatHistory.push({ role: 'assistant', content: followContent });
+
+              const { text: fText, actions: fActions } = parseAgenticResponse(followContent);
+              addChatMessage('assistant', fText, fActions);
+              // Follow-up actions also get queued, not auto-executed
+              if (fActions.length > 0) {
+                addSystemMessage(`${fActions.length} action(s) queued — click **Apply All** to execute.`);
+              }
+            } else {
+              followUpLoading.remove();
+              addChatMessage('system', `Follow-up error: ${followUp.error || 'Unknown error'}`);
+            }
+          } catch (fuErr) {
+            followUpLoading.remove();
+            addChatMessage('system', `Follow-up error: ${fuErr.message}`);
+          }
         }
       } else {
         addChatMessage('assistant', aiContent);
       }
     } else {
+      console.log('[sendChat] Error result:', result.error);
       addChatMessage('system', `Error: ${result.error || 'Unknown error'}`);
     }
   } catch (err) {
+    console.error('[sendChat] Exception:', err);
     loadingDiv.remove();
     addChatMessage('system', `Error: ${err.message}`);
   }
 
   dom.btnSendChat.disabled = false;
+  chatBusy = false;
 }
 
 function buildSystemPrompt() {
@@ -841,6 +955,10 @@ Currently browsing: ${state.currentBrowseDir}
     prompt += `
 AGENTIC MODE IS ON. You can perform actions by including special blocks in your response:
 
+To read a file:
+<READ_FILE path="/absolute/path/to/file">
+</READ_FILE>
+
 To edit/create a file:
 <EDIT_FILE path="/absolute/path/to/file">
 file contents here
@@ -854,6 +972,7 @@ command here
 You can include multiple actions. Explain what you're doing before each action.
 Always use absolute paths. The working directory is ${state.workingDir}.
 Be proactive: if the user asks you to build something, write the code and create the files.
+If you need to read a file first, use READ_FILE. The file contents will be shown to you.
 If you need to install packages, use the RUN_CMD block.
 `;
   }
@@ -875,6 +994,16 @@ function parseAgenticResponse(content) {
       description: `Write to ${match[1]}`,
     });
     text = text.replace(match[0], `[📝 Edit: ${match[1]}]`);
+  }
+
+  const readRegex = /<READ_FILE\s+path="([^"]+)">[\s\S]*?<\/READ_FILE>/g;
+  while ((match = readRegex.exec(content)) !== null) {
+    actions.push({
+      type: 'read',
+      filePath: match[1],
+      description: `Read ${match[1]}`,
+    });
+    text = text.replace(match[0], `[📖 Read: ${match[1]}]`);
   }
 
   const cmdRegex = /<RUN_CMD>\n?([\s\S]*?)<\/RUN_CMD>/g;
@@ -906,6 +1035,21 @@ async function executeAction(action) {
         await loadFileTree(state.currentBrowseDir);
       } else {
         addSystemMessage(`Failed to write ${action.filePath}: ${result.error}`);
+      }
+    } else if (action.type === 'read') {
+      addSystemMessage(`Reading: ${action.filePath}`);
+      const result = await window.api.fs.read(action.filePath);
+      if (result.success) {
+        const content = result.content;
+        const lines = content.split('\n').length;
+        const preview = lines > 100 ? content.split('\n').slice(0, 100).join('\n') + `\n... (${lines} total lines)` : content;
+        addSystemMessage(`📖 ${action.filePath} (${lines} lines):\n\`\`\`\n${preview}\n\`\`\``);
+        // Add file content to chat history so the model can see it on next turn
+        state.chatHistory.push({ role: 'system', content: `File ${action.filePath} contents:\n${preview}` });
+        // Also open the file in the editor
+        await openFile(action.filePath);
+      } else {
+        addSystemMessage(`Failed to read ${action.filePath}: ${result.error}`);
       }
     } else if (action.type === 'command') {
       addSystemMessage(`Running: ${action.command}`);

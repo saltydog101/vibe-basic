@@ -197,7 +197,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('ollama:chat', async (event, { model, messages }) => {
     try {
+      console.log('[ollama:chat] Sending request to', ollamaHost, 'model:', model, 'messages:', messages.length);
       const raw = await ollamaFetch('/api/chat', { model, messages, stream: false }, 300000);
+      console.log('[ollama:chat] Got response, length:', raw?.length, 'first 200 chars:', raw?.substring(0, 200));
 
       if (!raw || raw.trim() === '') {
         return { success: false, error: 'Empty response from Ollama' };
@@ -208,11 +210,13 @@ app.whenReady().then(() => {
         if (data.error) {
           return { success: false, error: `Ollama error: ${data.error}` };
         }
+        console.log('[ollama:chat] Parsed OK, content length:', data.message?.content?.length, 'has thinking:', !!data.message?.thinking);
         return { success: true, message: data.message };
       } catch (parseErr) {
         return { success: false, error: `Failed to parse Ollama response: ${raw.substring(0, 500)}` };
       }
     } catch (err) {
+      console.error('[ollama:chat] Error:', err.message);
       return { success: false, error: err.message };
     }
   });
