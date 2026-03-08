@@ -21,16 +21,20 @@
 | **Vision** | qwen2.5vl:7b | 7.6B | 5 GB | VRAM (on demand) | Screenshot/image analysis |
 | **Embedder** | nomic-embed-text | 137M | 604 MB | VRAM (always) | Codebase indexing, RAG semantic search |
 
-### VRAM Budget
+### VRAM Budget (observed via `ollama ps`)
 
 | Model | VRAM | num_ctx | Keep-alive |
 |-------|------|---------|------------|
-| qwen3-coder-next | ~54 GB | 32768 | Forever |
-| qwen3:4b | ~2.5 GB | 2048 | Forever |
-| qwen2.5vl:7b | ~5 GB | 4096 | On demand |
-| nomic-embed-text | ~0.6 GB | N/A | Forever |
-| **Total (always)** | **~57 GB** | | |
-| **Total (w/ vision)** | **~62 GB** | | |
+| qwen3-coder-next | 54 GB | 32768 | Forever |
+| qwen3:4b | 3.5 GB | 2048 | Forever |
+| qwen2.5vl:7b | 17 GB* | 32768* | Forever* |
+| nomic-embed-text | 604 MB | 2048 | Forever |
+| **Total** | **~75 GB** | | |
+
+> *Vision model is bloated because it was loaded without `num_ctx` limit, so Ollama
+> auto-expanded to 32768 context (17 GB). Once the IDE calls it with `num_ctx: 4096`,
+> this should drop to ~5 GB. To fix now: `ollama stop qwen2.5vl:7b` on the AI box
+> and let the IDE reload it with the correct context limit.
 
 **Rule**: Every `ollama:chat` API call MUST include `options.num_ctx` to cap context size per model role:
 
