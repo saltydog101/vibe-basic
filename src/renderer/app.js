@@ -15,9 +15,15 @@ const state = {
   openFiles: new Map(),
   activeTab: null,
   chatHistory: [],
-  ollamaModel: 'qwen3:32b',
   ollamaHost: 'http://192.168.10.160:11434',
   agenticMode: true,
+  autoRoute: true,
+  showRouting: true,
+  modelRoles: {
+    router: { model: 'qwen3:4b', num_ctx: 2048 },
+    coder: { model: 'qwen3-coder-next:latest', num_ctx: 32768 },
+    vision: { model: 'qwen2.5vl:7b', num_ctx: 4096 },
+  },
   ollamaConnected: false,
   editor: null,
   terminal: null,
@@ -36,7 +42,14 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const dom = {
   settingsModal: $('#settings-modal'),
   settingsOllamaHost: $('#setting-ollama-host'),
-  settingsOllamaModel: $('#setting-ollama-model'),
+  settingsModelRouter: $('#setting-model-router'),
+  settingsCtxRouter: $('#setting-ctx-router'),
+  settingsModelCoder: $('#setting-model-coder'),
+  settingsCtxCoder: $('#setting-ctx-coder'),
+  settingsModelVision: $('#setting-model-vision'),
+  settingsCtxVision: $('#setting-ctx-vision'),
+  settingsAutoRoute: $('#setting-auto-route'),
+  settingsShowRouting: $('#setting-show-routing'),
   settingsWorkDir: $('#setting-work-dir'),
   settingsError: $('#settings-error'),
   btnSettingsSave: $('#btn-settings-save'),
@@ -105,7 +118,7 @@ async function initApp() {
     refreshFileTree();
   }, 5000);
 
-  addSystemMessage(`Vibe IDE ready. Local files at ${homedir}. Ollama server: ${state.ollamaHost}. Model: ${state.ollamaModel}. Agentic mode enabled.`);
+  addSystemMessage(`Vibe IDE ready. Local files at ${homedir}. Ollama: ${state.ollamaHost}. Coder: ${state.modelRoles.coder.model}, Router: ${state.modelRoles.router.model}, Vision: ${state.modelRoles.vision.model}. Auto-route: ${state.autoRoute ? 'ON' : 'OFF'}.`);
 }
 
 async function checkOllamaConnection() {
@@ -124,7 +137,14 @@ async function checkOllamaConnection() {
 // ---- Settings Modal ----
 dom.btnSettings.addEventListener('click', () => {
   dom.settingsOllamaHost.value = state.ollamaHost;
-  dom.settingsOllamaModel.value = state.ollamaModel;
+  dom.settingsModelRouter.value = state.modelRoles.router.model;
+  dom.settingsCtxRouter.value = state.modelRoles.router.num_ctx;
+  dom.settingsModelCoder.value = state.modelRoles.coder.model;
+  dom.settingsCtxCoder.value = state.modelRoles.coder.num_ctx;
+  dom.settingsModelVision.value = state.modelRoles.vision.model;
+  dom.settingsCtxVision.value = state.modelRoles.vision.num_ctx;
+  dom.settingsAutoRoute.checked = state.autoRoute;
+  dom.settingsShowRouting.checked = state.showRouting;
   dom.settingsWorkDir.value = state.workingDir;
   dom.settingsError.textContent = '';
   dom.settingsModal.classList.remove('hidden');
@@ -136,7 +156,6 @@ dom.btnSettingsCancel.addEventListener('click', () => {
 
 dom.btnSettingsSave.addEventListener('click', async () => {
   const newHost = dom.settingsOllamaHost.value.trim();
-  const newModel = dom.settingsOllamaModel.value.trim();
   const newWorkDir = dom.settingsWorkDir.value.trim();
 
   if (newHost && newHost !== state.ollamaHost) {
@@ -144,9 +163,15 @@ dom.btnSettingsSave.addEventListener('click', async () => {
     await window.api.config.setOllamaHost(newHost);
   }
 
-  if (newModel) {
-    state.ollamaModel = newModel;
-  }
+  // Model roles
+  state.modelRoles.router.model = dom.settingsModelRouter.value.trim() || state.modelRoles.router.model;
+  state.modelRoles.router.num_ctx = parseInt(dom.settingsCtxRouter.value) || 2048;
+  state.modelRoles.coder.model = dom.settingsModelCoder.value.trim() || state.modelRoles.coder.model;
+  state.modelRoles.coder.num_ctx = parseInt(dom.settingsCtxCoder.value) || 32768;
+  state.modelRoles.vision.model = dom.settingsModelVision.value.trim() || state.modelRoles.vision.model;
+  state.modelRoles.vision.num_ctx = parseInt(dom.settingsCtxVision.value) || 4096;
+  state.autoRoute = dom.settingsAutoRoute.checked;
+  state.showRouting = dom.settingsShowRouting.checked;
 
   if (newWorkDir && newWorkDir !== state.workingDir) {
     state.workingDir = newWorkDir;
@@ -159,7 +184,7 @@ dom.btnSettingsSave.addEventListener('click', async () => {
   await loadOllamaModels();
 
   dom.settingsModal.classList.add('hidden');
-  addSystemMessage(`Settings updated. Ollama: ${state.ollamaHost}, Model: ${state.ollamaModel}, Dir: ${state.workingDir}`);
+  addSystemMessage(`Settings updated. Router: ${state.modelRoles.router.model}, Coder: ${state.modelRoles.coder.model}, Vision: ${state.modelRoles.vision.model}, Auto-route: ${state.autoRoute}`);
 });
 
 // ---- Editor ----
@@ -681,24 +706,25 @@ async function loadOllamaModels() {
       const opt = document.createElement('option');
       opt.value = m.name;
       opt.textContent = m.name;
-      if (m.name === state.ollamaModel) opt.selected = true;
+      if (m.name === state.modelRoles.coder.model) opt.selected = true;
       dom.modelSelect.appendChild(opt);
     }
-    // If current model not in list, select first
-    if (!result.models.find((m) => m.name === state.ollamaModel) && result.models.length > 0) {
-      state.ollamaModel = result.models[0].name;
-      dom.modelSelect.value = state.ollamaModel;
+    // If current coder model not in list (fuzzy match: ignore :latest suffix), keep user setting
+    const coderBase = state.modelRoles.coder.model.replace(/:latest$/, '');
+    const match = result.models.find((m) => m.name === state.modelRoles.coder.model || m.name.replace(/:latest$/, '') === coderBase);
+    if (match) {
+      dom.modelSelect.value = match.name;
     }
   } else {
     const opt = document.createElement('option');
-    opt.value = state.ollamaModel;
-    opt.textContent = state.ollamaModel + ' (not verified)';
+    opt.value = state.modelRoles.coder.model;
+    opt.textContent = state.modelRoles.coder.model + ' (not verified)';
     dom.modelSelect.appendChild(opt);
   }
 }
 
 dom.modelSelect.addEventListener('change', () => {
-  state.ollamaModel = dom.modelSelect.value;
+  state.modelRoles.coder.model = dom.modelSelect.value;
 });
 
 dom.btnOllamaModels.addEventListener('click', async () => {
@@ -834,6 +860,70 @@ dom.btnApplyAll.addEventListener('click', async () => {
   updateApplyAllButton();
 });
 
+// ---- Router: classify request ----
+async function classifyRequest(userMessage, hasImage) {
+  if (!state.autoRoute) {
+    // No auto-routing — default to code if agentic, general if not
+    if (hasImage) return 'vision';
+    return state.agenticMode ? 'code' : 'general';
+  }
+
+  // Quick shortcut: if image attached, always vision
+  if (hasImage) return 'vision';
+
+  const routerPrompt = `Classify this user request into exactly one category.
+Reply with ONLY the category name, nothing else.
+
+Categories:
+- code: request involves reading, writing, editing, creating, or analyzing code/files
+- general: general question, explanation, or discussion
+
+User request: "${userMessage.substring(0, 500)}"
+
+Category:`;
+
+  try {
+    console.log('[router] Classifying with', state.modelRoles.router.model);
+    const result = await window.api.ollama.chat({
+      model: state.modelRoles.router.model,
+      messages: [{ role: 'user', content: routerPrompt }],
+      options: { num_ctx: state.modelRoles.router.num_ctx },
+    });
+
+    if (result.success && result.message) {
+      const raw = (result.message.content || '').trim().toLowerCase();
+      // Extract just the category word
+      const category = raw.match(/\b(vision|code|general)\b/)?.[1] || 'code';
+      console.log('[router] Classification:', category, '(raw:', raw.substring(0, 50), ')');
+      return category;
+    }
+  } catch (err) {
+    console.warn('[router] Classification failed, defaulting to code:', err.message);
+  }
+  return 'code';
+}
+
+// ---- Vision: describe screenshot ----
+async function describeScreenshot(screenshotBase64, userText) {
+  console.log('[vision] Sending to', state.modelRoles.vision.model);
+  const messages = [
+    { role: 'user', content: userText || 'Describe this screenshot in detail, focusing on any code, UI elements, errors, or relevant technical details.', images: [screenshotBase64] },
+  ];
+
+  const result = await window.api.ollama.chat({
+    model: state.modelRoles.vision.model,
+    messages,
+    options: { num_ctx: state.modelRoles.vision.num_ctx },
+  });
+
+  if (result.success && result.message) {
+    const description = result.message.content || '';
+    console.log('[vision] Description length:', description.length);
+    return description;
+  }
+  throw new Error(result.error || 'Vision model failed');
+}
+
 async function sendChat() {
   const input = dom.chatInput.value.trim();
   if (!input && !state.pendingScreenshot) return;
@@ -859,43 +949,61 @@ async function sendChat() {
     : input;
   addChatMessage('user', displayText, null, screenshotBase64);
 
-  const systemPrompt = buildSystemPrompt();
-  const userContent = screenshotBase64
-    ? `${input}\n\n[A screenshot image is attached to this message. Describe what you see if relevant to the request.]`
-    : input;
-  state.chatHistory.push({ role: 'user', content: userContent });
-
-  // Build messages — attach image to the last user message for Ollama
-  const historyMessages = state.chatHistory.slice(-20);
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...historyMessages,
-  ];
-
-  // If screenshot, add images array to the last user message (Ollama vision format)
-  if (screenshotBase64) {
-    const lastUserIdx = messages.length - 1;
-    for (let i = lastUserIdx; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        messages[i] = { ...messages[i], images: [screenshotBase64] };
-        break;
-      }
-    }
-  }
-
+  // Loading indicator
   const loadingDiv = document.createElement('div');
   loadingDiv.className = 'chat-message';
-  loadingDiv.innerHTML = '<div class="role assistant-role">AI</div><div class="content"><span class="spinner"></span> Thinking...</div>';
+  loadingDiv.innerHTML = '<div class="role assistant-role">AI</div><div class="content"><span class="spinner"></span> Routing...</div>';
   dom.chatMessages.appendChild(loadingDiv);
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-
   dom.btnSendChat.disabled = true;
 
   try {
-    console.log('[sendChat] Calling ollama.chat, model:', state.ollamaModel, 'messages:', messages.length);
+    // Step 1: Classify the request
+    const route = await classifyRequest(input, !!screenshotBase64);
+    if (state.showRouting) {
+      const routeEmoji = route === 'vision' ? '👁️' : route === 'code' ? '💻' : '💬';
+      addSystemMessage(`🔀 Route: ${routeEmoji} ${route} → ${route === 'vision' ? state.modelRoles.vision.model + ' → ' : ''}${state.modelRoles.coder.model}`);
+    }
+    loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> ${route === 'vision' ? 'Analyzing screenshot...' : 'Thinking...'}`;
+
+    // Step 2: If vision, get description from vision model first
+    let visionDescription = '';
+    if (route === 'vision' && screenshotBase64) {
+      try {
+        visionDescription = await describeScreenshot(screenshotBase64, input);
+        if (state.showRouting) {
+          addSystemMessage(`👁️ Vision: ${visionDescription.substring(0, 200)}${visionDescription.length > 200 ? '...' : ''}`);
+        }
+        loadingDiv.querySelector('.content').innerHTML = '<span class="spinner"></span> Processing with coder...';
+      } catch (vErr) {
+        addSystemMessage(`Vision error: ${vErr.message}. Falling back to coder only.`);
+      }
+    }
+
+    // Step 3: Build the user content for the coder
+    let userContent = input;
+    if (visionDescription) {
+      userContent = `${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}`;
+    } else if (screenshotBase64) {
+      userContent = `${input}\n\n[A screenshot image was attached but could not be analyzed by the vision model.]`;
+    }
+    state.chatHistory.push({ role: 'user', content: userContent });
+
+    // Step 4: Build system prompt — suppress agentic blocks for "general" route
+    const useAgentic = state.agenticMode && route !== 'general';
+    const systemPrompt = buildSystemPrompt(useAgentic);
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...state.chatHistory.slice(-20),
+    ];
+
+    // Step 5: Call the coder model
+    console.log('[sendChat] Calling coder:', state.modelRoles.coder.model, 'messages:', messages.length, 'agentic:', useAgentic, 'route:', route);
     const result = await window.api.ollama.chat({
-      model: state.ollamaModel,
+      model: state.modelRoles.coder.model,
       messages,
+      options: { num_ctx: state.modelRoles.coder.num_ctx },
     });
 
     console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
@@ -906,7 +1014,7 @@ async function sendChat() {
       console.log('[sendChat] AI content length:', aiContent.length, 'first 200:', aiContent.substring(0, 200));
       state.chatHistory.push({ role: 'assistant', content: aiContent });
 
-      if (state.agenticMode) {
+      if (useAgentic) {
         const { text, actions } = parseAgenticResponse(aiContent);
         console.log('[sendChat] Parsed agentic: text length:', text.length, 'actions:', actions.length);
         addChatMessage('assistant', text, actions);
@@ -917,7 +1025,6 @@ async function sendChat() {
         }
 
         // Auto-execute READ_FILE actions immediately (they just display content)
-        // All other actions get queued for Apply All
         const readActions = cappedActions.filter(a => a.type === 'read');
         const otherActions = cappedActions.filter(a => a.type !== 'read');
 
@@ -925,7 +1032,6 @@ async function sendChat() {
           console.log('[sendChat] Auto-executing read:', action.filePath);
           await executeAction(action);
           addSystemMessage(`Read: ${action.filePath}`);
-          // Remove from pending since we auto-executed it
           pendingActions = pendingActions.filter(a => !(a.type === 'read' && a.filePath === action.filePath));
           updateApplyAllButton();
         }
@@ -944,12 +1050,10 @@ async function sendChat() {
           dom.chatMessages.appendChild(followUpLoading);
           dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 
-          // Find the original user request from chatHistory
           const originalRequest = state.chatHistory.filter(m => m.role === 'user' && !m.content.startsWith('[File contents of')).slice(-1)[0]?.content || '';
 
-          // Build follow-up — include full history so model has file contents + original request
           const followUpMessages = [
-            { role: 'system', content: buildSystemPrompt() },
+            { role: 'system', content: buildSystemPrompt(true) },
             ...state.chatHistory.slice(-30),
             { role: 'user', content: `The file contents have been provided above. Here is the original request again: "${originalRequest}"\n\nNow analyze the file contents and perform the requested actions. Do NOT use READ_FILE again for files already shown above. Use EDIT_FILE to create any output files. Produce the EDIT_FILE block now.` },
           ];
@@ -958,8 +1062,9 @@ async function sendChat() {
 
           try {
             const followUp = await window.api.ollama.chat({
-              model: state.ollamaModel,
+              model: state.modelRoles.coder.model,
               messages: followUpMessages,
+              options: { num_ctx: state.modelRoles.coder.num_ctx },
             });
             followUpLoading.remove();
 
@@ -972,7 +1077,6 @@ async function sendChat() {
               const { text: fText, actions: fActions } = parseAgenticResponse(followContent);
               console.log('[sendChat] Follow-up parsed:', fActions.length, 'actions');
               addChatMessage('assistant', fText, fActions);
-              // Follow-up actions also get queued, not auto-executed
               if (fActions.length > 0) {
                 addSystemMessage(`${fActions.length} action(s) queued — click **Apply All** to execute.`);
               }
@@ -1003,7 +1107,10 @@ async function sendChat() {
   chatBusy = false;
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt(agentic) {
+  // If agentic param not passed, use state default
+  const useAgentic = agentic !== undefined ? agentic : state.agenticMode;
+
   let prompt = `You are an AI coding assistant embedded in Vibe IDE. You help the user with coding tasks on their local machine.
 
 Working directory: ${state.workingDir}
@@ -1024,7 +1131,7 @@ Currently browsing: ${state.currentBrowseDir}
     }
   }
 
-  if (state.agenticMode) {
+  if (useAgentic) {
     prompt += `
 AGENTIC MODE IS ON. You can perform actions by including special blocks in your response:
 

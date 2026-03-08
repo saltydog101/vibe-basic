@@ -195,10 +195,12 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('ollama:chat', async (event, { model, messages }) => {
+  ipcMain.handle('ollama:chat', async (event, { model, messages, options, images }) => {
     try {
-      console.log('[ollama:chat] Sending request to', ollamaHost, 'model:', model, 'messages:', messages.length);
-      const raw = await ollamaFetch('/api/chat', { model, messages, stream: false }, 300000);
+      console.log('[ollama:chat] Sending request to', ollamaHost, 'model:', model, 'messages:', messages.length, 'num_ctx:', options?.num_ctx || 'default');
+      const body = { model, messages, stream: false };
+      if (options) body.options = options;
+      const raw = await ollamaFetch('/api/chat', body, 300000);
       console.log('[ollama:chat] Got response, length:', raw?.length, 'first 200 chars:', raw?.substring(0, 200));
 
       if (!raw || raw.trim() === '') {
@@ -221,9 +223,11 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('ollama:chat:stream', async (event, { model, messages }) => {
+  ipcMain.handle('ollama:chat:stream', async (event, { model, messages, options }) => {
     try {
-      const raw = await ollamaFetch('/api/chat', { model, messages, stream: true }, 300000);
+      const body = { model, messages, stream: true };
+      if (options) body.options = options;
+      const raw = await ollamaFetch('/api/chat', body, 300000);
 
       if (!raw || raw.trim() === '') {
         return { success: false, error: 'Empty response from Ollama' };

@@ -66,6 +66,17 @@ body {
   font-weight: 500;
 }
 
+.form-row {
+  display: flex;
+  gap: 8px;
+}
+.form-group-half {
+  flex: 1;
+}
+.form-group-half:last-child {
+  flex: 0 0 80px;
+}
+
 .form-group {
   margin-bottom: 14px;
 }
