@@ -39,6 +39,16 @@
       </div>
       <div class="form-row">
         <div class="form-group form-group-half">
+          <label for="setting-model-planner">Planner</label>
+          <input type="text" id="setting-model-planner" placeholder="qwen3:32b" value="qwen3:32b">
+        </div>
+        <div class="form-group form-group-half">
+          <label for="setting-ctx-planner">Context</label>
+          <input type="number" id="setting-ctx-planner" value="16384" min="1024" max="131072">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group form-group-half">
           <label for="setting-model-coder">Coder</label>
           <input type="text" id="setting-model-coder" placeholder="qwen3-coder-next:latest" value="qwen3-coder-next:latest">
         </div>

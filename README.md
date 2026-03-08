@@ -8,8 +8,9 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 - **Local File Explorer** — Browse, create, and delete files/folders on the local machine
 - **Integrated Terminal** — Full interactive local shell (xterm.js)
 - **Multi-Model AI Routing** — Automatic request classification using a fast router model
-  - **Router** (qwen3:4b) — classifies requests as vision/code/general in ~1 second
-  - **Coder** (qwen3-coder-next) — 79.7B parameter model for code generation, analysis, planning
+  - **Router** (qwen3:4b) — classifies requests as vision/architecture/code/general in ~1 second
+  - **Planner** (qwen3:32b) — 32B dense model for architecture, multi-file planning, design decisions
+  - **Coder** (qwen3-coder-next) — 79.7B MoE model for code generation and implementation
   - **Vision** (minicpm-v) — screenshot/image analysis, forwards descriptions to coder
 - **Agentic Mode** — AI can read/create/edit files and run commands automatically
 - **Screenshot Capture** — Select a screen region, AI analyzes it via the vision model
@@ -25,6 +26,7 @@ An Electron-based IDE for agentic/vibe coding with multi-model AI routing. Uses 
 2. **Ollama** running on a reachable host (default: `http://192.168.10.160:11434`)
 3. Required models pulled on the Ollama server:
    - `qwen3:4b` (router)
+   - `qwen3:32b` (planner)
    - `qwen3-coder-next:latest` (coder)
    - `minicpm-v:latest` (vision)
    - `nomic-embed-text` (embedder, optional)
@@ -72,10 +74,11 @@ npm run dev
 
 When auto-route is enabled, every request goes through a classification step:
 
-1. **Router** (qwen3:4b) classifies the request as `vision`, `code`, or `general`
-2. **Vision** route: screenshot → minicpm-v describes → coder acts on description
-3. **Code** route: coder responds with full agentic capabilities (read/edit/run)
-4. **General** route: coder responds without agentic action blocks
+1. **Router** (qwen3:4b) classifies the request as `vision`, `architecture`, `code`, or `general`
+2. **Architecture** route: qwen3:32b produces a detailed plan → coder executes it with EDIT_FILE blocks
+3. **Vision** route: screenshot → minicpm-v describes → coder acts on description
+4. **Code** route: coder responds with full agentic capabilities (read/edit/run)
+5. **General** route: coder responds without agentic action blocks
 
 See [docs/multi-model-routing.md](docs/multi-model-routing.md) for the full architecture.
 
@@ -119,7 +122,9 @@ Configurable via the Settings modal (gear icon):
 | Ollama Host | `http://192.168.10.160:11434` | Ollama API endpoint |
 | Router Model | `qwen3:4b` | Fast classification model |
 | Router Context | `2048` | num_ctx for router |
-| Coder Model | `qwen3-coder-next:latest` | Main code generation model |
+| Planner Model | `qwen3:32b` | Architecture/planning model |
+| Planner Context | `16384` | num_ctx for planner |
+| Coder Model | `qwen3-coder-next:latest` | Code generation model |
 | Coder Context | `32768` | num_ctx for coder |
 | Vision Model | `minicpm-v:latest` | Image analysis model |
 | Vision Context | `2048` | num_ctx for vision |

@@ -21,6 +21,7 @@ const state = {
   showRouting: true,
   modelRoles: {
     router: { model: 'qwen3:4b', num_ctx: 2048 },
+    planner: { model: 'qwen3:32b', num_ctx: 16384 },
     coder: { model: 'qwen3-coder-next:latest', num_ctx: 32768 },
     vision: { model: 'minicpm-v:latest', num_ctx: 2048 },
   },
@@ -44,6 +45,8 @@ const dom = {
   settingsOllamaHost: $('#setting-ollama-host'),
   settingsModelRouter: $('#setting-model-router'),
   settingsCtxRouter: $('#setting-ctx-router'),
+  settingsModelPlanner: $('#setting-model-planner'),
+  settingsCtxPlanner: $('#setting-ctx-planner'),
   settingsModelCoder: $('#setting-model-coder'),
   settingsCtxCoder: $('#setting-ctx-coder'),
   settingsModelVision: $('#setting-model-vision'),
@@ -119,7 +122,7 @@ async function initApp() {
     refreshFileTree();
   }, 5000);
 
-  addSystemMessage(`Vibe IDE ready. Local files at ${homedir}. Ollama: ${state.ollamaHost}. Coder: ${state.modelRoles.coder.model}, Router: ${state.modelRoles.router.model}, Vision: ${state.modelRoles.vision.model}. Auto-route: ${state.autoRoute ? 'ON' : 'OFF'}.`);
+  addSystemMessage(`Vibe IDE ready. Local files at ${homedir}. Ollama: ${state.ollamaHost}. Coder: ${state.modelRoles.coder.model}, Planner: ${state.modelRoles.planner.model}, Router: ${state.modelRoles.router.model}, Vision: ${state.modelRoles.vision.model}. Auto-route: ${state.autoRoute ? 'ON' : 'OFF'}.`);
 }
 
 async function checkOllamaConnection() {
@@ -140,6 +143,8 @@ dom.btnSettings.addEventListener('click', () => {
   dom.settingsOllamaHost.value = state.ollamaHost;
   dom.settingsModelRouter.value = state.modelRoles.router.model;
   dom.settingsCtxRouter.value = state.modelRoles.router.num_ctx;
+  dom.settingsModelPlanner.value = state.modelRoles.planner.model;
+  dom.settingsCtxPlanner.value = state.modelRoles.planner.num_ctx;
   dom.settingsModelCoder.value = state.modelRoles.coder.model;
   dom.settingsCtxCoder.value = state.modelRoles.coder.num_ctx;
   dom.settingsModelVision.value = state.modelRoles.vision.model;
@@ -167,10 +172,12 @@ dom.btnSettingsSave.addEventListener('click', async () => {
   // Model roles
   state.modelRoles.router.model = dom.settingsModelRouter.value.trim() || state.modelRoles.router.model;
   state.modelRoles.router.num_ctx = parseInt(dom.settingsCtxRouter.value) || 2048;
+  state.modelRoles.planner.model = dom.settingsModelPlanner.value.trim() || state.modelRoles.planner.model;
+  state.modelRoles.planner.num_ctx = parseInt(dom.settingsCtxPlanner.value) || 16384;
   state.modelRoles.coder.model = dom.settingsModelCoder.value.trim() || state.modelRoles.coder.model;
   state.modelRoles.coder.num_ctx = parseInt(dom.settingsCtxCoder.value) || 32768;
   state.modelRoles.vision.model = dom.settingsModelVision.value.trim() || state.modelRoles.vision.model;
-  state.modelRoles.vision.num_ctx = parseInt(dom.settingsCtxVision.value) || 4096;
+  state.modelRoles.vision.num_ctx = parseInt(dom.settingsCtxVision.value) || 2048;
   state.autoRoute = dom.settingsAutoRoute.checked;
   state.showRouting = dom.settingsShowRouting.checked;
 
@@ -185,7 +192,7 @@ dom.btnSettingsSave.addEventListener('click', async () => {
   await loadOllamaModels();
 
   dom.settingsModal.classList.add('hidden');
-  addSystemMessage(`Settings updated. Router: ${state.modelRoles.router.model}, Coder: ${state.modelRoles.coder.model}, Vision: ${state.modelRoles.vision.model}, Auto-route: ${state.autoRoute}`);
+  addSystemMessage(`Settings updated. Router: ${state.modelRoles.router.model}, Planner: ${state.modelRoles.planner.model}, Coder: ${state.modelRoles.coder.model}, Vision: ${state.modelRoles.vision.model}, Auto-route: ${state.autoRoute}`);
 });
 
 // ---- Editor ----
@@ -877,7 +884,8 @@ async function classifyRequest(userMessage, hasImage) {
 Reply with ONLY the category name, nothing else.
 
 Categories:
-- code: request involves reading, writing, editing, creating, or analyzing code/files
+- architecture: request involves multi-file scaffolding, project structure, design decisions, refactoring across files, or creating a new project/module from a spec
+- code: request involves reading, writing, editing, or debugging a single file or small change
 - general: general question, explanation, or discussion
 
 User request: "${userMessage.substring(0, 500)}"
@@ -896,7 +904,7 @@ Category:`;
     if (result.success && result.message) {
       const raw = (result.message.content || '').trim().toLowerCase();
       // Extract just the category word
-      const category = raw.match(/\b(vision|code|general)\b/)?.[1] || 'code';
+      const category = raw.match(/\b(vision|architecture|code|general)\b/)?.[1] || 'code';
       console.log('[router] Classification:', category, '(raw:', raw.substring(0, 50), ')');
       return category;
     }
@@ -926,6 +934,49 @@ async function describeScreenshot(screenshotBase64, userText) {
     return description;
   }
   throw new Error(result.error || 'Vision model failed');
+}
+
+// ---- Planner: architecture/multi-file planning ----
+async function createArchitecturePlan(userMessage, chatHistory) {
+  console.log('[planner] Sending to', state.modelRoles.planner.model);
+
+  const plannerSystemPrompt = `You are an expert software architect. Your job is to analyze the user's request and produce a detailed implementation plan.
+
+Working directory: ${state.workingDir}
+
+${state.currentFile ? `Currently open file: ${state.currentFile}` : ''}
+
+Your plan MUST include:
+1. A brief summary of the approach (2-3 sentences)
+2. A numbered list of EVERY file that needs to be created or modified, with:
+   - Full absolute file path
+   - What the file does / what changes are needed
+   - Key classes, functions, or endpoints it should contain
+3. Dependencies or packages needed (if any)
+4. The order files should be created in (considering dependencies between them)
+
+Be specific and thorough. The coder model will use your plan to generate all the actual code.
+Do NOT write any code yourself — just the plan and file list.`;
+
+  const messages = [
+    { role: 'system', content: plannerSystemPrompt },
+    ...chatHistory.slice(-10),
+    { role: 'user', content: userMessage },
+  ];
+
+  const result = await window.api.ollama.chat({
+    model: state.modelRoles.planner.model,
+    messages,
+    options: { num_ctx: state.modelRoles.planner.num_ctx },
+    timeout: 300000, // 5 minutes — planning can take a while with large context
+  });
+
+  if (result.success && result.message) {
+    const plan = result.message.content || '';
+    console.log('[planner] Plan length:', plan.length);
+    return plan;
+  }
+  throw new Error(result.error || 'Planner model failed');
 }
 
 async function sendChat() {
@@ -968,10 +1019,14 @@ async function sendChat() {
     // Step 1: Classify the request
     const route = await classifyRequest(input, !!screenshotBase64);
     if (state.showRouting) {
-      const routeEmoji = route === 'vision' ? '👁️' : route === 'code' ? '💻' : '💬';
-      addSystemMessage(`🔀 Route: ${routeEmoji} ${route} → ${route === 'vision' ? state.modelRoles.vision.model + ' → ' : ''}${state.modelRoles.coder.model}`);
+      const routeEmoji = { vision: '👁️', architecture: '🏗️', code: '💻', general: '💬' }[route] || '💻';
+      const pipeline = route === 'vision' ? `${state.modelRoles.vision.model} → ${state.modelRoles.coder.model}`
+        : route === 'architecture' ? `${state.modelRoles.planner.model} → ${state.modelRoles.coder.model}`
+        : state.modelRoles.coder.model;
+      addSystemMessage(`🔀 Route: ${routeEmoji} ${route} → ${pipeline}`);
     }
-    loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> ${route === 'vision' ? 'Analyzing screenshot...' : 'Thinking...'}`;
+    const statusText = { vision: 'Analyzing screenshot...', architecture: 'Planning architecture...', code: 'Thinking...', general: 'Thinking...' };
+    loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> ${statusText[route] || 'Thinking...'}`;
 
     // Step 2: If vision, get description from vision model first
     let visionDescription = '';
@@ -987,10 +1042,28 @@ async function sendChat() {
       }
     }
 
+    // Step 2b: If architecture, get plan from planner model first
+    let architecturePlan = '';
+    if (route === 'architecture') {
+      try {
+        architecturePlan = await createArchitecturePlan(input, state.chatHistory);
+        if (state.showRouting) {
+          addSystemMessage(`🏗️ Plan from ${state.modelRoles.planner.model}:\n${architecturePlan.substring(0, 500)}${architecturePlan.length > 500 ? '...' : ''}`);
+        }
+        // Show the full plan as an assistant message from the planner
+        addChatMessage('assistant', `**Architecture Plan** (${state.modelRoles.planner.model}):\n\n${architecturePlan}`);
+        loadingDiv.querySelector('.content').innerHTML = '<span class="spinner"></span> Executing plan with coder...';
+      } catch (pErr) {
+        addSystemMessage(`Planner error: ${pErr.message}. Falling back to coder only.`);
+      }
+    }
+
     // Step 3: Build the user content for the coder
     let userContent = input;
     if (visionDescription) {
       userContent = `${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}`;
+    } else if (architecturePlan) {
+      userContent = `${input}\n\n[Architecture plan from planner model — implement this plan NOW using EDIT_FILE blocks for EVERY file listed]:\n${architecturePlan}`;
     } else if (screenshotBase64) {
       userContent = `${input}\n\n[A screenshot image was attached but could not be analyzed by the vision model.]`;
     }
@@ -1011,7 +1084,7 @@ async function sendChat() {
       model: state.modelRoles.coder.model,
       messages,
       options: { num_ctx: state.modelRoles.coder.num_ctx },
-      timeout: 600000, // 10 minutes — large code generation
+      timeout: route === 'architecture' ? 900000 : 600000, // 15 min for architecture, 10 min otherwise
     });
 
     console.log('[sendChat] Got result:', JSON.stringify(result).substring(0, 300));
