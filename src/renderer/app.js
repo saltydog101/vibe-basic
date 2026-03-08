@@ -1093,12 +1093,24 @@ async function describeScreenshot(screenshotBase64, userText) {
 async function createArchitecturePlan(userMessage, chatHistory) {
   console.log('[planner] Sending to', state.modelRoles.planner.model);
 
+  // Get recursive file listing of working directory for accurate planning
+  let dirTree = '';
+  try {
+    const listing = await window.api.fs.listRecursive(state.workingDir, 500);
+    if (listing.success && listing.files) {
+      dirTree = listing.files.map(f => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+      console.log('[planner] Got recursive listing:', listing.files.length, 'items');
+    }
+  } catch (e) {
+    console.warn('[planner] Could not get recursive listing:', e.message);
+  }
+
   const plannerSystemPrompt = `You are an expert software architect. Your job is to analyze the user's request and produce a detailed implementation plan that a coder model will EXECUTE.
 
 Working directory: ${state.workingDir}
 
 ${state.currentFile ? `Currently open file: ${state.currentFile}` : ''}
-
+${dirTree ? `\nCOMPLETE FILE LISTING of ${state.workingDir}:\n${dirTree}\n` : ''}
 Your plan MUST include:
 1. A brief summary of the approach (2-3 sentences)
 2. An EXPLICIT ordered list of operations. For EACH operation specify ONE of:
@@ -1110,6 +1122,7 @@ Your plan MUST include:
 3. Dependencies or packages needed (if any)
 
 CRITICAL RULES:
+- ONLY reference files that ACTUALLY EXIST in the file listing above. Do NOT guess file names.
 - For RESTRUCTURING tasks (moving files around): use MOVE operations with exact paths. Do NOT recreate files that already exist — MOVE them.
 - Always use FULL ABSOLUTE paths starting with ${state.workingDir}
 - List mkdir commands BEFORE any mv commands that depend on the target directory existing
@@ -1120,7 +1133,7 @@ Do NOT write any code yourself — just the plan with explicit file operations.`
 
   const messages = [
     { role: 'system', content: plannerSystemPrompt },
-    ...chatHistory.slice(-10),
+    ...chatHistory.slice(-6),
     { role: 'user', content: userMessage },
   ];
 
@@ -1366,24 +1379,48 @@ async function sendChat() {
           addSystemMessage(`⚠ Capped at ${MAX_ACTIONS_PER_RESPONSE} actions (${actions.length} requested). Run remaining manually.`);
         }
 
-        // Auto-execute READ_FILE actions immediately (they just display content)
+        // For architecture route: auto-execute ALL actions (mkdir, mv, rm, edit)
+        // For other routes: only auto-execute reads, queue edits/commands for Apply All
+        if (route === 'architecture') {
+          addSystemMessage(`🏗️ Auto-executing ${cappedActions.length} architecture actions...`);
+          let execOk = 0, execFail = 0;
+          for (const action of cappedActions) {
+            if (chatCancelled) break;
+            try {
+              console.log('[sendChat] Auto-exec architecture action:', action.type, action.filePath || action.command);
+              await executeAction(action);
+              execOk++;
+              // Remove from pending since we already executed it
+              if (action.type === 'edit') pendingActions = pendingActions.filter(a => a.filePath !== action.filePath);
+              else if (action.type === 'command') pendingActions = pendingActions.filter(a => a.command !== action.command);
+              else if (action.type === 'read') pendingActions = pendingActions.filter(a => !(a.type === 'read' && a.filePath === action.filePath));
+            } catch (execErr) {
+              execFail++;
+              addSystemMessage(`⚠ Failed: ${action.type} ${action.filePath || action.command}: ${execErr.message}`);
+            }
+          }
+          updateApplyAllButton();
+          addSystemMessage(`✅ Architecture: ${execOk} succeeded, ${execFail} failed.`);
+        } else {
+          // Non-architecture: auto-execute reads, queue others
+          for (const action of cappedActions.filter(a => a.type === 'read')) {
+            console.log('[sendChat] Auto-executing read:', action.filePath);
+            await executeAction(action);
+            addSystemMessage(`Read: ${action.filePath}`);
+            pendingActions = pendingActions.filter(a => !(a.type === 'read' && a.filePath === action.filePath));
+            updateApplyAllButton();
+          }
+
+          const queued = cappedActions.filter(a => a.type !== 'read');
+          if (queued.length > 0) {
+            addSystemMessage(`${queued.length} action(s) queued — click **Apply All** to execute.`);
+          }
+        }
+
+        // If only read actions (non-architecture), auto-follow-up so model can analyze
         const readActions = cappedActions.filter(a => a.type === 'read');
         const otherActions = cappedActions.filter(a => a.type !== 'read');
-
-        for (const action of readActions) {
-          console.log('[sendChat] Auto-executing read:', action.filePath);
-          await executeAction(action);
-          addSystemMessage(`Read: ${action.filePath}`);
-          pendingActions = pendingActions.filter(a => !(a.type === 'read' && a.filePath === action.filePath));
-          updateApplyAllButton();
-        }
-
-        if (otherActions.length > 0) {
-          addSystemMessage(`${otherActions.length} action(s) queued — click **Apply All** to execute.`);
-        }
-
-        // If only read actions, auto-follow-up so model can analyze
-        if (readActions.length > 0 && otherActions.length === 0) {
+        if (route !== 'architecture' && readActions.length > 0 && otherActions.length === 0) {
           console.log('[sendChat] Auto-follow-up after READ_FILE actions');
 
           const followUpLoading = document.createElement('div');
