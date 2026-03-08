@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const pty = require('node-pty');
 
 class LocalManager {
   constructor() {
@@ -122,15 +123,16 @@ class LocalManager {
 
   startShell(onData, onClose) {
     const shellCmd = process.env.SHELL || '/bin/bash';
-    this.shell = spawn(shellCmd, ['-i'], {
-      env: { ...process.env, TERM: 'xterm-256color' },
+    this.shell = pty.spawn(shellCmd, [], {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
       cwd: os.homedir(),
-      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, TERM: 'xterm-256color' },
     });
 
-    this.shell.stdout.on('data', (data) => onData(data.toString()));
-    this.shell.stderr.on('data', (data) => onData(data.toString()));
-    this.shell.on('close', () => {
+    this.shell.onData((data) => onData(data));
+    this.shell.onExit(() => {
       this.shell = null;
       onClose();
     });
@@ -139,14 +141,15 @@ class LocalManager {
   }
 
   writeToShell(data) {
-    if (this.shell && this.shell.stdin.writable) {
-      this.shell.stdin.write(data);
+    if (this.shell) {
+      this.shell.write(data);
     }
   }
 
   resizeShell(cols, rows) {
-    // Basic spawn doesn't support resize; node-pty would be needed for full PTY
-    // This is a no-op for now
+    if (this.shell) {
+      this.shell.resize(cols, rows);
+    }
   }
 
   killShell() {
