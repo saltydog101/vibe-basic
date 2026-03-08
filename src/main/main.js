@@ -322,10 +322,10 @@ app.whenReady().then(() => {
           if (entry.name.startsWith('.')) continue;
           if (entry.name === 'node_modules' || entry.name === '__pycache__' || entry.name === '.git') continue;
           const fullPath = require('path').join(dir, entry.name);
-          if (entry.isDirectory()) {
+          const isDir = entry.isDirectory();
+          files.push({ path: fullPath, isDirectory: isDir });
+          if (isDir) {
             walkSync(fullPath, depth + 1);
-          } else {
-            files.push(fullPath);
           }
         }
       };
