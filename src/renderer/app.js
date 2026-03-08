@@ -1168,7 +1168,7 @@ async function sendChat() {
 
   try {
     // Step 1: Classify the request
-    const route = await classifyRequest(input, !!screenshotBase64);
+    let route = await classifyRequest(input, !!screenshotBase64);
     if (state.showRouting) {
       const routeEmoji = { vision: '👁️', architecture: '🏗️', code: '💻', general: '💬' }[route] || '💻';
       const pipeline = route === 'vision' ? `${state.modelRoles.vision.model} → ${state.modelRoles.coder.model}`
@@ -1193,7 +1193,19 @@ async function sendChat() {
       }
     }
 
-    // Step 2b: If architecture, get plan from planner model first
+    // Step 2b: If vision produced a description, re-classify to see if it needs architecture planning
+    if (route === 'vision' && visionDescription) {
+      const reRoute = await classifyRequest(`${input}\n\nContext from screenshot: ${visionDescription}`, false);
+      if (reRoute === 'architecture') {
+        if (state.showRouting) {
+          addSystemMessage(`🔀 Re-routed: vision → architecture (screenshot shows structural task)`);
+        }
+        route = 'architecture';
+        loadingDiv.querySelector('.content').innerHTML = '<span class="spinner"></span> Planning architecture...';
+      }
+    }
+
+    // Step 2c: If architecture, get plan from planner model first
     let architecturePlan = '';
     if (route === 'architecture') {
       try {
@@ -1211,8 +1223,11 @@ async function sendChat() {
 
     // Step 3: Build the user content for the coder
     let userContent = input;
-    if (visionDescription) {
-      userContent = `${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}`;
+    if (visionDescription && architecturePlan) {
+      // Vision + architecture combined pipeline
+      userContent = `USER REQUEST: ${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}\n\n---\nARCHITECTURE PLAN (from planner model — you MUST execute this NOW):\n${architecturePlan}\n---\n\nIMPORTANT INSTRUCTIONS:\n- You MUST produce action blocks (EDIT_FILE, RUN_CMD) in THIS response.\n- Do NOT just describe what you will do. Actually DO it with action blocks.\n- Use EDIT_FILE to create/write files, RUN_CMD for mkdir/mv/rm.\n- Start with a 1-2 sentence summary, then immediately output action blocks.`;
+    } else if (visionDescription) {
+      userContent = `${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}\n\nBased on the screenshot analysis above, take action. Use EDIT_FILE and RUN_CMD blocks to implement any changes needed.`;
     } else if (architecturePlan) {
       userContent = `USER REQUEST: ${input}\n\n---\nARCHITECTURE PLAN (from planner model — you MUST execute this NOW):\n${architecturePlan}\n---\n\nIMPORTANT INSTRUCTIONS:\n- You MUST produce action blocks (EDIT_FILE, RUN_CMD) in THIS response to implement the plan above.\n- Do NOT just describe what you will do. Actually DO it with action blocks.\n- Use EDIT_FILE to create/write files with their full contents.\n- Use RUN_CMD for mkdir, mv, rm, pip install, npm install, etc.\n- Create ALL files listed in the plan in a SINGLE response.\n- Start with a 1-2 sentence summary, then immediately output action blocks.`;
     } else if (screenshotBase64) {
