@@ -1239,17 +1239,25 @@ async function sendChat() {
     const useAgentic = state.agenticMode && route !== 'general';
     const systemPrompt = buildSystemPrompt(useAgentic, route === 'architecture');
 
+    // For architecture route, limit chat history to avoid context bloat that starves output tokens.
+    // The plan + instructions are already in the latest user message, so we don't need old history.
+    const historySlice = route === 'architecture' ? state.chatHistory.slice(-4) : state.chatHistory.slice(-20);
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...state.chatHistory.slice(-20),
+      ...historySlice,
     ];
 
     // Step 5: Call the coder model
-    console.log('[sendChat] Calling coder:', state.modelRoles.coder.model, 'messages:', messages.length, 'agentic:', useAgentic, 'route:', route);
+    const coderOptions = { num_ctx: state.modelRoles.coder.num_ctx };
+    if (route === 'architecture') {
+      coderOptions.num_predict = 16384; // Allow large output for multi-file scaffolding
+    }
+    const totalChars = messages.reduce((s, m) => s + m.content.length, 0);
+    console.log('[sendChat] Calling coder:', state.modelRoles.coder.model, 'messages:', messages.length, 'totalChars:', totalChars, 'agentic:', useAgentic, 'route:', route, 'num_predict:', coderOptions.num_predict || 'default');
     const result = await window.api.ollama.chat({
       model: state.modelRoles.coder.model,
       messages,
-      options: { num_ctx: state.modelRoles.coder.num_ctx },
+      options: coderOptions,
       timeout: route === 'architecture' ? 900000 : 600000, // 15 min for architecture, 10 min otherwise
     });
 
