@@ -21,8 +21,8 @@ const state = {
   showRouting: true,
   modelRoles: {
     router: { model: 'qwen3:4b', num_ctx: 2048 },
-    coder: { model: 'qwen3-coder-32k:latest', num_ctx: 32768 },
-    vision: { model: 'qwen2.5-vl:7b', num_ctx: 4096 },
+    coder: { model: 'qwen3-coder-next:latest', num_ctx: 32768 },
+    vision: { model: 'qwen2.5vl:7b', num_ctx: 4096 },
   },
   ollamaConnected: false,
   editor: null,
@@ -709,10 +709,11 @@ async function loadOllamaModels() {
       if (m.name === state.modelRoles.coder.model) opt.selected = true;
       dom.modelSelect.appendChild(opt);
     }
-    // If current coder model not in list, select first
-    if (!result.models.find((m) => m.name === state.modelRoles.coder.model) && result.models.length > 0) {
-      state.modelRoles.coder.model = result.models[0].name;
-      dom.modelSelect.value = state.modelRoles.coder.model;
+    // If current coder model not in list (fuzzy match: ignore :latest suffix), keep user setting
+    const coderBase = state.modelRoles.coder.model.replace(/:latest$/, '');
+    const match = result.models.find((m) => m.name === state.modelRoles.coder.model || m.name.replace(/:latest$/, '') === coderBase);
+    if (match) {
+      dom.modelSelect.value = match.name;
     }
   } else {
     const opt = document.createElement('option');
