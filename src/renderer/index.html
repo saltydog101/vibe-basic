@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vibe IDE</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+  <!-- Load xterm BEFORE Monaco's AMD loader to avoid define.amd conflicts -->
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script>
+    // Capture xterm globals before Monaco's AMD loader overwrites define
+    window.__Terminal = window.Terminal;
+  </script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script>
+    window.__FitAddon = window.FitAddon;
+  </script>
+</head>
+<body>
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Settings</h2>
+      <div class="form-group">
+        <label for="setting-ollama-host">Ollama Server URL</label>
+        <input type="text" id="setting-ollama-host" placeholder="http://192.168.10.160:11434" value="http://192.168.10.160:11434">
+      </div>
+      <div class="form-group">
+        <label for="setting-ollama-model">Ollama Model</label>
+        <input type="text" id="setting-ollama-model" placeholder="qwen3:32b" value="qwen3:32b">
+      </div>
+      <div class="form-group">
+        <label for="setting-work-dir">Working Directory</label>
+        <input type="text" id="setting-work-dir" placeholder="/home/rob" value="">
+      </div>
+      <div id="settings-error" class="error-msg"></div>
+      <div class="modal-actions">
+        <button id="btn-settings-cancel" class="btn btn-sm">Cancel</button>
+        <button id="btn-settings-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Layout -->
+  <div id="app" class="hidden">
+    <!-- Title Bar -->
+    <div id="titlebar">
+      <div class="titlebar-left">
+        <span class="app-name">Vibe IDE</span>
+        <span id="ollama-status" class="connection-badge">Ollama</span>
+      </div>
+      <div class="titlebar-center">
+        <span id="current-file-path" class="file-path">No file open</span>
+        <span id="file-modified" class="modified-indicator hidden">*</span>
+      </div>
+      <div class="titlebar-right">
+        <button id="btn-save" class="btn btn-sm" title="Save (Ctrl+S)">Save</button>
+        <button id="btn-ollama-models" class="btn btn-sm" title="Refresh Ollama Models">Models</button>
+        <button id="btn-settings" class="btn btn-sm" title="Settings">⚙ Settings</button>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content">
+      <!-- Sidebar: File Explorer -->
+      <div id="sidebar">
+        <div class="sidebar-header">
+          <span>Explorer</span>
+          <div class="sidebar-actions">
+            <button id="btn-open-folder" class="icon-btn" title="Open Folder">📂</button>
+            <button id="btn-new-file" class="icon-btn" title="New File">+F</button>
+            <button id="btn-new-folder" class="icon-btn" title="New Folder">+D</button>
+            <button id="btn-refresh" class="icon-btn" title="Refresh">R</button>
+          </div>
+        </div>
+        <div id="file-tree"></div>
+      </div>
+
+      <!-- Resizer -->
+      <div class="resizer" id="sidebar-resizer"></div>
+
+      <!-- Center: Editor + Terminal -->
+      <div id="center-panel">
+        <!-- Tab Bar -->
+        <div id="tab-bar"></div>
+
+        <!-- Editor -->
+        <div id="editor-container"></div>
+
+        <!-- Horizontal Resizer -->
+        <div class="resizer-h" id="terminal-resizer"></div>
+
+        <!-- Terminal -->
+        <div id="terminal-panel">
+          <div class="panel-header">
+            <span>Terminal</span>
+            <button id="btn-clear-terminal" class="icon-btn" title="Clear">CLR</button>
+          </div>
+          <div id="terminal-container"></div>
+        </div>
+      </div>
+
+      <!-- Resizer -->
+      <div class="resizer" id="chat-resizer"></div>
+
+      <!-- Right: AI Chat -->
+      <div id="chat-panel">
+        <div class="panel-header">
+          <span>AI Assistant</span>
+          <select id="model-select" class="model-select">
+            <option value="">Select model...</option>
+          </select>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+          <textarea id="chat-input" placeholder="Ask the AI to edit files, run commands, or explain code... (Enter to send, Shift+Enter for newline)" rows="3"></textarea>
+          <div class="chat-actions">
+            <label class="checkbox-label">
+              <input type="checkbox" id="agentic-mode" checked>
+              Agentic Mode
+            </label>
+            <button id="btn-send-chat" class="btn btn-primary btn-sm">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="statusbar">
+      <span id="status-left">Disconnected</span>
+      <span id="status-center"></span>
+      <span id="status-right"></span>
+    </div>
+  </div>
+
+  <!-- Quick File Picker Overlay (Ctrl+P) -->
+  <div id="quick-picker" class="hidden">
+    <div class="quick-picker-backdrop"></div>
+    <div class="quick-picker-dialog">
+      <input type="text" id="quick-picker-input" placeholder="Type to search files... (Esc to close)" autocomplete="off" spellcheck="false">
+      <div id="quick-picker-results"></div>
+    </div>
+  </div>
+
+  <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script>
+    require.config({ paths: { vs: '../../node_modules/monaco-editor/min/vs' } });
+    require(['vs/editor/editor.main'], function () {
+      // Monaco is now loaded as global `monaco`
+      const script = document.createElement('script');
+      script.src = 'app.js';
+      document.body.appendChild(script);
+    });
+  </script>
+</body>
+</html>

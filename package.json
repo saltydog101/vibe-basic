@@ -1,0 +1,19 @@
+{
+  "name": "vibe-basic",
+  "version": "1.0.0",
+  "description": "Local-first agentic IDE with Ollama AI integration",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "ssh2": "^1.15.0",
+    "monaco-editor": "^0.45.0",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0"
+  },
+  "devDependencies": {
+    "electron": "^28.1.0"
+  }
+}
