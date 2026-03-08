@@ -107,8 +107,6 @@ const dom = {
   btnClosePreview: $('#btn-close-preview'),
 };
 
-const marked = require('marked');
-
 // ---- App Init (immediate, no connection needed) ----
 async function initApp() {
   // Get home directory from main process
