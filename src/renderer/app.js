@@ -1214,7 +1214,7 @@ async function sendChat() {
     if (visionDescription) {
       userContent = `${input}\n\n[Screenshot analysis from vision model]:\n${visionDescription}`;
     } else if (architecturePlan) {
-      userContent = `${input}\n\n[Architecture plan from planner model — implement this plan NOW using EDIT_FILE blocks for EVERY file listed]:\n${architecturePlan}`;
+      userContent = `USER REQUEST: ${input}\n\n---\nARCHITECTURE PLAN (from planner model — you MUST execute this NOW):\n${architecturePlan}\n---\n\nIMPORTANT INSTRUCTIONS:\n- You MUST produce action blocks (EDIT_FILE, RUN_CMD) in THIS response to implement the plan above.\n- Do NOT just describe what you will do. Actually DO it with action blocks.\n- Use EDIT_FILE to create/write files with their full contents.\n- Use RUN_CMD for mkdir, mv, rm, pip install, npm install, etc.\n- Create ALL files listed in the plan in a SINGLE response.\n- Start with a 1-2 sentence summary, then immediately output action blocks.`;
     } else if (screenshotBase64) {
       userContent = `${input}\n\n[A screenshot image was attached but could not be analyzed by the vision model.]`;
     }
@@ -1222,7 +1222,7 @@ async function sendChat() {
 
     // Step 4: Build system prompt — suppress agentic blocks for "general" route
     const useAgentic = state.agenticMode && route !== 'general';
-    const systemPrompt = buildSystemPrompt(useAgentic);
+    const systemPrompt = buildSystemPrompt(useAgentic, route === 'architecture');
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -1359,7 +1359,7 @@ dom.btnCancelChat.addEventListener('click', async () => {
   addSystemMessage('Request cancelled.');
 });
 
-function buildSystemPrompt(agentic) {
+function buildSystemPrompt(agentic, isArchitecture) {
   // If agentic param not passed, use state default
   const useAgentic = agentic !== undefined ? agentic : state.agenticMode;
 
@@ -1406,6 +1406,20 @@ Always use absolute paths. The working directory is ${state.workingDir}.
 Be proactive: if the user asks you to build something, write the code and create the files.
 If you need to read a file first, use READ_FILE. The file contents will be shown to you.
 If you need to install packages, use the RUN_CMD block.
+To move or rename files, use RUN_CMD with mv commands.
+To delete files, use RUN_CMD with rm commands.
+To create directories, use RUN_CMD with mkdir -p commands.
+`;
+  }
+
+  if (isArchitecture && useAgentic) {
+    prompt += `
+ARCHITECTURE MODE: A planner model has already created a detailed plan for you.
+Your ONLY job is to EXECUTE that plan by producing EDIT_FILE and RUN_CMD blocks.
+DO NOT explain, summarize, or describe what you plan to do.
+DO NOT use READ_FILE unless absolutely necessary — the plan already tells you what to create.
+START your response with action blocks immediately.
+Produce ALL files in ONE response. Do not stop early.
 `;
   }
 
