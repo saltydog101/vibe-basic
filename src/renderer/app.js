@@ -1257,10 +1257,11 @@ async function sendChat() {
 
     let fullAiContent = '';
     let continuationMessages = [...messages];
-    const MAX_CONTINUATIONS = 5;
+    const MAX_CONTINUATIONS = 10;
     let continuationCount = 0;
+    let allActions = [];
 
-    // Loop: call coder, check if truncated, auto-continue if architecture route
+    // Loop: call coder, parse actions, auto-continue for architecture if new actions were produced
     while (true) {
       const result = await window.api.ollama.chat({
         model: state.modelRoles.coder.model,
@@ -1286,22 +1287,36 @@ async function sendChat() {
 
       const chunk = result.message.content || '';
       fullAiContent += chunk;
-      console.log('[sendChat] Chunk length:', chunk.length, 'total so far:', fullAiContent.length, 'continuation:', continuationCount);
 
-      // Check if response was truncated and we should continue (architecture route only)
-      if (route === 'architecture' && result.done_reason === 'length' && continuationCount < MAX_CONTINUATIONS) {
+      // Parse actions from this chunk
+      const { actions: chunkActions } = parseAgenticResponse(chunk);
+      allActions.push(...chunkActions);
+      const filesSoFar = allActions.filter(a => a.type === 'edit' || a.type === 'command').length;
+
+      console.log('[sendChat] Chunk length:', chunk.length, 'chunk actions:', chunkActions.length, 'total actions so far:', allActions.length, 'files/cmds so far:', filesSoFar, 'continuation:', continuationCount);
+
+      // For architecture route: keep going if the coder produced action blocks (it's still working)
+      // Stop if: no actions in this chunk, or hit max continuations, or not architecture
+      const shouldContinue = route === 'architecture' &&
+        chunkActions.length > 0 &&
+        continuationCount < MAX_CONTINUATIONS &&
+        !chatCancelled;
+
+      if (shouldContinue) {
         continuationCount++;
-        addSystemMessage(`⏳ Response truncated — auto-continuing (${continuationCount}/${MAX_CONTINUATIONS})...`);
-        loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> Continuing... (part ${continuationCount + 1})`;
+        const completedFiles = allActions.filter(a => a.type === 'edit').map(a => a.filePath || a.description).join(', ');
+        addSystemMessage(`⏳ Auto-continuing (${continuationCount}/${MAX_CONTINUATIONS}) — ${filesSoFar} actions so far...`);
+        loadingDiv.querySelector('.content').innerHTML = `<span class="spinner"></span> Continuing... (part ${continuationCount + 1}, ${filesSoFar} actions so far)`;
 
         // Add the partial response as assistant, then ask to continue
         continuationMessages = [
-          ...continuationMessages,
+          continuationMessages[0], // system prompt
+          continuationMessages[continuationMessages.length - 1], // latest user message with plan
           { role: 'assistant', content: chunk },
-          { role: 'user', content: 'Continue from where you left off. Keep producing EDIT_FILE and RUN_CMD blocks for the remaining files. Do NOT repeat files already created above.' },
+          { role: 'user', content: `Good. You have created ${filesSoFar} actions so far. Continue producing the REMAINING EDIT_FILE and RUN_CMD blocks from the architecture plan. Do NOT repeat files already created. When you have created ALL files from the plan, end your response with the text "ALL_FILES_COMPLETE".` },
         ];
       } else {
-        break; // Done (either complete, or not architecture, or max continuations reached)
+        break;
       }
     }
 
