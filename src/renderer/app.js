@@ -1096,7 +1096,8 @@ async function createArchitecturePlan(userMessage, chatHistory) {
   // Get recursive file listing of working directory for accurate planning
   let dirTree = '';
   try {
-    const listing = await window.api.fs.listRecursive(state.workingDir, 500);
+    const browseDir = state.currentBrowseDir || state.workingDir;
+    const listing = await window.api.fs.listRecursive(browseDir, 500);
     if (listing.success && listing.files) {
       dirTree = listing.files.map(f => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
       console.log('[planner] Got recursive listing:', listing.files.length, 'items');
@@ -1105,12 +1106,13 @@ async function createArchitecturePlan(userMessage, chatHistory) {
     console.warn('[planner] Could not get recursive listing:', e.message);
   }
 
+  const targetDir = state.currentBrowseDir || state.workingDir;
   const plannerSystemPrompt = `You are an expert software architect. Your job is to analyze the user's request and produce a detailed implementation plan that a coder model will EXECUTE.
 
-Working directory: ${state.workingDir}
+Working directory: ${targetDir}
 
 ${state.currentFile ? `Currently open file: ${state.currentFile}` : ''}
-${dirTree ? `\nCOMPLETE FILE LISTING of ${state.workingDir}:\n${dirTree}\n` : ''}
+${dirTree ? `\nCOMPLETE FILE LISTING of ${targetDir}:\n${dirTree}\n` : ''}
 Your plan MUST include:
 1. A brief summary of the approach (2-3 sentences)
 2. An EXPLICIT ordered list of operations. For EACH operation specify ONE of:
@@ -1124,9 +1126,9 @@ Your plan MUST include:
 CRITICAL RULES:
 - ONLY reference files that ACTUALLY EXIST in the file listing above. Do NOT guess file names.
 - For RESTRUCTURING tasks (moving files around): use MOVE operations with exact paths. Do NOT recreate files that already exist — MOVE them.
-- Always use FULL ABSOLUTE paths starting with ${state.workingDir}
+- Always use FULL ABSOLUTE paths starting with ${targetDir}
 - List mkdir commands BEFORE any mv commands that depend on the target directory existing
-- Be specific: "mv ${state.workingDir}/api/routes.py ${state.workingDir}/src/api/routes.py" not "move API files"
+- Be specific: "mv ${targetDir}/api/routes.py ${targetDir}/src/api/routes.py" not "move API files"
 - The coder will convert MOVE/MKDIR/DELETE into RUN_CMD blocks and CREATE/EDIT into EDIT_FILE blocks
 
 Do NOT write any code yourself — just the plan with explicit file operations.`;
@@ -1507,10 +1509,10 @@ function buildSystemPrompt(agentic, isArchitecture) {
   // If agentic param not passed, use state default
   const useAgentic = agentic !== undefined ? agentic : state.agenticMode;
 
+  const effectiveDir = state.currentBrowseDir || state.workingDir;
   let prompt = `You are an AI coding assistant embedded in Vibe IDE. You help the user with coding tasks on their local machine.
 
-Working directory: ${state.workingDir}
-Currently browsing: ${state.currentBrowseDir}
+Working directory: ${effectiveDir}
 `;
 
   if (state.currentFile) {
@@ -1546,7 +1548,7 @@ command here
 </RUN_CMD>
 
 You can include multiple actions. Explain what you're doing before each action.
-Always use absolute paths. The working directory is ${state.workingDir}.
+Always use absolute paths. The working directory is ${effectiveDir}.
 Be proactive: if the user asks you to build something, write the code and create the files.
 If you need to read a file first, use READ_FILE. The file contents will be shown to you.
 If you need to install packages, use the RUN_CMD block.
